@@ -1,0 +1,36 @@
+name: Build and Deploy to Itch.io
+
+on:
+  push:
+    branches:
+      - main # Название вашей основной ветки (main или master)
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Скачиваем репозиторий
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Устанавливаем Bun
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      # 3. Ставим зависимости и собираем проект через bun
+      - name: Install dependencies & Build
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      # 4. Выгружаем собранную папку dist на itch.io
+      - name: Deploy to Itch.io
+        uses: Ayowel/butler-to-itch@v2
+        with:
+          butler_key: ${{ secrets.BUTLER_API_KEY }}
+          itch_user: grimthinker
+          itch_game: dungeoned
+          files: dist
+          auto_channel: false
+          channel: html5
