@@ -47,12 +47,22 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
     setZoomFactor(1.0);
   }, [targetId]);
 
-  // Приближение/отдаление колесиком мыши (от 0.5x до 1.0x текущей дистанции)
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setZoomFactor((prev) => Math.max(0.5, Math.min(1.0, prev + e.deltaY * 0.001)));
-  };
+  // Приближение/отдаление колесиком мыши с нативным слушателем для корректного preventDefault
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleNativeWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setZoomFactor((prev) => Math.max(0.5, Math.min(1.0, prev + e.deltaY * 0.001)));
+    };
+
+    container.addEventListener('wheel', handleNativeWheel, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', handleNativeWheel);
+    };
+  }, []);
 
   // 1. Инициализация сцены, мягкого освещения и рендерера
   useEffect(() => {
@@ -361,7 +371,6 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
   return (
     <div
       ref={containerRef}
-      onWheel={handleWheel}
       style={{
         width: '100%',
         height: '100%',

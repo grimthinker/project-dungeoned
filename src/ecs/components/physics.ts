@@ -13,6 +13,10 @@ export interface TransformComponent {
   angle: Radians;
   /** Флаг ручного изменения (например, из редактора) для безопасной синхронизации с физическим движком */
   isDirty?: boolean;
+  /** Позиция на предыдущем физическом шаге для плавной рендер-интерполяции */
+  prevX?: number;
+  prevY?: number;
+  prevZ?: number;
 }
 
 export type ColliderShapeType = 'cuboid' | 'ball' | 'cylinder' | 'capsule' | 'convexHull';

@@ -38,9 +38,9 @@ export const BlockTargetPanel: React.FC<BlockTargetPanelProps> = ({
     <div
       style={{
         position: 'absolute',
-        top: 250,
-        right: 16,
-        width: 224,
+        top: 266,
+        right: 12,
+        width: 220,
         ...RETRO_PANEL_STYLE,
         padding: '6px',
         zIndex: 85,

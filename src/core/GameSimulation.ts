@@ -97,6 +97,14 @@ export class GameSimulation {
   }
 
   public fixedUpdate(dt: number): void {
+    // Сохраняем предыдущие позиции для суб-кадровой интерполяции рендера
+    const allTransforms = this.world.getEntitiesWith('transform');
+    for (const [, { transform }] of allTransforms) {
+      transform.prevX = transform.x;
+      transform.prevY = transform.y;
+      transform.prevZ = transform.z;
+    }
+
     const mousePos = this.app.getMouseScreenPos();
     const playerId = this.getPlayerEntityId() ?? undefined;
 
@@ -172,7 +180,8 @@ export class GameSimulation {
     }
 
     if (this.app.gameMode === GameMode.GAME) {
-      const headPos = this.getPlayerHeadPosition();
+      const alpha = Math.min(1.0, this.app.time.physicsAccumulator / this.app.time.FIXED_DT);
+      const headPos = this.getPlayerHeadPosition(null, alpha);
       if (headPos) {
         this.app.camera.setDesiredTarget(headPos.x, headPos.y, headPos.z);
       }
@@ -215,11 +224,15 @@ export class GameSimulation {
     return null;
   }
 
-  public getPlayerHeadPosition(playerId?: string | null): Vec3 | null {
+  public getPlayerHeadPosition(playerId?: string | null, alpha: number = 0): Vec3 | null {
     const id = playerId ?? this.getPlayerEntityId();
     if (!id) return null;
     const tr = this.world.getComponent(id, 'transform');
     if (!tr) return null;
+
+    const x = tr.prevX !== undefined ? tr.prevX + (tr.x - tr.prevX) * alpha : tr.x;
+    const y = tr.prevY !== undefined ? tr.prevY + (tr.y - tr.prevY) * alpha : tr.y;
+    const z = tr.prevZ !== undefined ? tr.prevZ + (tr.z - tr.prevZ) * alpha : tr.z;
 
     const physStats = this.world.getComponent(id, 'physicsStats');
     const baseHeight = physStats?.height?.current ?? 1.8;
@@ -231,9 +244,9 @@ export class GameSimulation {
     const headRatio = BALANCE_CONFIG.camera.gameMode.headHeightRatio;
 
     return {
-      x: tr.x,
-      y: tr.y + currentHeight * headRatio,
-      z: tr.z,
+      x,
+      y: y + currentHeight * headRatio,
+      z,
     };
   }
 

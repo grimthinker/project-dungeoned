@@ -5,7 +5,7 @@ import { GameMode } from '../config/gameConfig';
 export class TimeManager {
   private lastTime: number = 0;
   private isRunning: boolean = false;
-  private physicsAccumulator: number = 0;
+  public physicsAccumulator: number = 0;
   public readonly FIXED_DT: number = 1 / 60;
   private readonly MAX_ACCUMULATOR_DT: number = 0.2;
 
@@ -92,7 +92,9 @@ export class TimeManager {
       this.app.selection.selectedEntityIds,
       this.app.celShading,
       this.app.camera.targetX,
-      this.app.camera.targetZ
+      this.app.camera.targetZ,
+      this.physicsAccumulator,
+      this.FIXED_DT
     );
 
     this.app.renderFrame();

@@ -256,7 +256,9 @@ export class ThreeSyncSystem {
     selectedIds: Set<EntityId>,
     celShading: boolean = false,
     cameraTargetX: number = 0,
-    cameraTargetZ: number = 0
+    cameraTargetZ: number = 0,
+    physicsAccumulator: number = 0,
+    fixedDt: number = 1 / 60
   ): void {
     this.currentWorld = world;
     if (celShading !== this.isCelShading) {
@@ -353,7 +355,22 @@ export class ThreeSyncSystem {
           if (obj.parent !== this.scene) {
             this.scene.add(obj);
           }
-          obj.position.set(transform.x, transform.y, transform.z);
+
+          const alpha = Math.min(1.0, physicsAccumulator / fixedDt);
+          const renderX =
+            transform.prevX !== undefined
+              ? transform.prevX + (transform.x - transform.prevX) * alpha
+              : transform.x;
+          const renderY =
+            transform.prevY !== undefined
+              ? transform.prevY + (transform.y - transform.prevY) * alpha
+              : transform.y;
+          const renderZ =
+            transform.prevZ !== undefined
+              ? transform.prevZ + (transform.z - transform.prevZ) * alpha
+              : transform.z;
+
+          obj.position.set(renderX, renderY, renderZ);
           if (transform.rotation) {
             obj.quaternion.set(
               transform.rotation.x,

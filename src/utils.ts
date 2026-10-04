@@ -1,4 +1,4 @@
-import { Point, TerrainHeightSampler, Vec3 } from './types';
+import { Point, TerrainData, TerrainHeightSampler, Vec3 } from './types';
 
 export type Radians = number;
 export type Degrees = number;
