@@ -1,8 +1,53 @@
 import { EntityConfig } from './ecs/types';
-import { BodyStructureType } from './ecs/templates';
 
 export type Radians = number;
 export type Degrees = number;
+
+export type BodyStructureType = 'humanoid' | 'quadruped' | 'arachnid';
+
+export interface TerrainHeightSampler {
+  width: number;
+  depth: number;
+  resolution: number;
+  heights: Float32Array;
+}
+
+export interface TerrainData extends TerrainHeightSampler {
+  splatResolution: number;
+  splatData: Uint8Array;
+  foliageData: Uint8Array;
+  textureTiling: number;
+  dirtyChunks?: Set<string>;
+  geometryVersion?: number;
+  splatVersion?: number;
+  foliageVersion?: number;
+  isGeometryDirty?: boolean;
+  isSplatDirty?: boolean;
+  isFoliageDirty?: boolean;
+  isPhysicsDirty?: boolean;
+}
+
+export type WaterBodyType = 'lake' | 'river';
+
+export interface WaterData {
+  width: number;
+  depth: number;
+  maxDepth: number;
+  waterType: WaterBodyType;
+  color: string;
+  deepColor: string;
+  opacity: number;
+  shallowOpacity: number;
+  clarity: number;
+  waveSpeed: number;
+  rippleSpeed: number;
+  rippleDamping: number;
+  waveHeight: number;
+  flowDirection: { x: number; z: number };
+  flowSpeed: number;
+  density: number;
+  viscosity: number;
+}
 
 /** 2D-координаты для экранных операций, рамки выделения и курсора в UI */
 export interface Point {

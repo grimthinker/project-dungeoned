@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import { TerrainComponent } from '../../ecs/components/terrain';
-import { EntityId } from '../../ecs/types';
+import { TerrainData } from '../../types';
 import { createTerrainMaterial } from './TerrainMaterial';
 import { createTerrainSkirtMaterial } from './TerrainSkirtMaterial';
 import { TerrainSkirtGeometryBuilder } from './TerrainSkirtGeometryBuilder';
@@ -13,7 +12,7 @@ export class TerrainSyncSystem {
   private globalSplatTexture: THREE.DataTexture | null = null;
   private rootGroup: THREE.Group | null = null;
 
-  public createTerrainMesh(id: EntityId, terrainComp: TerrainComponent): THREE.Group {
+  public createTerrainMesh(id: string, terrainComp: TerrainData): THREE.Group {
     this.rootGroup = new THREE.Group();
     this.rootGroup.userData.entityId = id;
 
@@ -85,7 +84,7 @@ export class TerrainSyncSystem {
     this.rootGroup = null;
   }
 
-  public syncTerrain(obj: THREE.Object3D, terrainComp: TerrainComponent): void {
+  public syncTerrain(obj: THREE.Object3D, terrainComp: TerrainData): void {
     if (terrainComp.isGeometryDirty) {
       if (!terrainComp.dirtyChunks) terrainComp.dirtyChunks = new Set<string>();
 

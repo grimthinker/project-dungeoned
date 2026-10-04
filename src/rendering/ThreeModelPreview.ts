@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { IModelPreview, PreviewPartAttachment } from './IModelPreview';
 import { AssetManager } from './AssetManager';
 import { CREATURE_RIG_PROFILES } from './rigProfiles';
-import { BodyStructureType } from '../ecs/templates';
+import { BodyStructureType } from '../types';
 import { computeLocalBox } from './gripCalculators';
 import { ProceduralCreatureAssetManager } from './creatures/ProceduralAssetManager';
 import { disposeObject } from './renderUtils';

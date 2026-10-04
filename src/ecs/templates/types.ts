@@ -1,6 +1,7 @@
 import { EntityConfig, MovementConfig } from '../types';
+import { BodyStructureType } from '../../types';
 
-export type BodyStructureType = 'humanoid' | 'quadruped' | 'arachnid';
+export type { BodyStructureType };
 
 export interface BlueprintPartDef {
   key: string;

@@ -1,125 +1,29 @@
 import React, { useEffect, useState } from 'react';
-import { World } from '../../ecs/World';
-import { getAnatomyParts } from '../../ecs/utils/hierarchy';
 import { RETRO_SUNKEN_STYLE } from './RetroStyles';
 import { HUD_CONFIG } from '../../config/hudConfig';
 import { t } from '../../locales';
-
 import { GAMEPLAY_CONFIG } from '../../config/gameplayConfig';
 import { StatusBars } from './StatusBars';
+import { IHudDataProvider } from './hudPorts';
 
 export interface InfoTabStatusProps {
-  world: World;
+  hudProvider: IHudDataProvider;
   targetId: string;
   isCurrentlySelected: boolean;
 }
 
-function getFpColor(currentFp: number, maxFp: number): string {
-  if (maxFp <= 0) return HUD_CONFIG.status.paperDoll.fpIntact;
-  const ratio = currentFp / maxFp;
-
-  if (ratio >= 0.5) {
-    const p = Math.min(1, Math.max(0, (ratio - 0.5) / 0.5));
-    const r = Math.round(255 * (1 - p));
-    const g = Math.round(255 * (1 - p) + 230 * p);
-    return `rgb(${r}, ${g}, 0)`;
-  } else if (ratio >= 0) {
-    const p = Math.min(1, Math.max(0, ratio / 0.5));
-    const g = Math.round(255 * p);
-    return `rgb(255, ${g}, 0)`;
-  } else {
-    const p = Math.min(1, Math.max(0, (ratio - -2.0) / 2.0));
-    const r = Math.round(255 * p);
-    return `rgb(${r}, 0, 0)`;
-  }
-}
-
 export const InfoTabStatus: React.FC<InfoTabStatusProps> = ({
-  world,
+  hudProvider,
   targetId,
   isCurrentlySelected,
 }) => {
-  const [hoveredBarId, setHoveredBarId] = useState<string | null>(null);
   const [hoveredPartKey, setHoveredPartKey] = useState<string | null>(null);
 
-  const captureSnapshot = () => {
-    const health = world.getComponent(targetId, 'health');
-    const animator = world.getComponent(targetId, 'animator');
-    const isHumanoid = animator?.rigType === 'humanoid';
-
-    const currentHp = health ? Math.round(health.current) : 100;
-    const maxHp = health ? Math.round(health.max.current) : 100;
-
-    const colors: Record<string, string> = {
-      head: HUD_CONFIG.status.paperDoll.fpIntact,
-      torso: HUD_CONFIG.status.paperDoll.fpIntact,
-      arm_l: HUD_CONFIG.status.paperDoll.fpIntact,
-      arm_r: HUD_CONFIG.status.paperDoll.fpIntact,
-      leg_l: HUD_CONFIG.status.paperDoll.fpIntact,
-      leg_r: HUD_CONFIG.status.paperDoll.fpIntact,
-    };
-
-    const fpMap: Record<string, { name: string; percent: number }> = {
-      head: { name: 'Голова', percent: 100 },
-      torso: { name: 'Туловище', percent: 100 },
-      arm_l: { name: 'Левая рука', percent: 100 },
-      arm_r: { name: 'Правая рука', percent: 100 },
-      leg_l: { name: 'Левая нога', percent: 100 },
-      leg_r: { name: 'Правая нога', percent: 100 },
-    };
-
-    if (isHumanoid) {
-      const parts = getAnatomyParts(world, targetId);
-      for (const pId of parts) {
-        const tag = world.getComponent(pId, 'tag');
-        const fp = world.getComponent(pId, 'functionalHealth');
-        const meta = world.getComponent(pId, 'meta');
-        const color = fp
-          ? getFpColor(fp.current, fp.max.current)
-          : HUD_CONFIG.status.paperDoll.fpIntact;
-        const percent =
-          fp && fp.max.current > 0 ? Math.round((fp.current / fp.max.current) * 100) : 100;
-
-        if (tag?.subType === 'head' || pId.includes('head')) {
-          colors.head = color;
-          fpMap.head = { name: meta?.name || 'Голова', percent };
-        } else if (tag?.subType === 'torso' || pId.includes('torso')) {
-          colors.torso = color;
-          fpMap.torso = { name: meta?.name || 'Туловище', percent };
-        } else if (tag?.subType === 'arm' || pId.includes('arm')) {
-          if (pId.includes('arm_l') || pId.includes('left')) {
-            colors.arm_l = color;
-            fpMap.arm_l = { name: meta?.name || 'Левая рука', percent };
-          } else {
-            colors.arm_r = color;
-            fpMap.arm_r = { name: meta?.name || 'Правая рука', percent };
-          }
-        } else if (tag?.subType === 'leg' || pId.includes('leg')) {
-          if (pId.includes('leg_l') || pId.includes('left')) {
-            colors.leg_l = color;
-            fpMap.leg_l = { name: meta?.name || 'Левая нога', percent };
-          } else {
-            colors.leg_r = color;
-            fpMap.leg_r = { name: meta?.name || 'Правая нога', percent };
-          }
-        }
-      }
-    }
-
-    return {
-      currentHp,
-      maxHp,
-      isHumanoid,
-      partColors: colors,
-      partFp: fpMap,
-    };
-  };
-
+  const captureSnapshot = () => hudProvider.getInspectStatus(targetId);
   const [snapshot, setSnapshot] = useState(captureSnapshot);
 
   useEffect(() => {
     if (!isCurrentlySelected) return;
-
     setSnapshot(captureSnapshot());
 
     const interval = setInterval(() => {
@@ -127,7 +31,7 @@ export const InfoTabStatus: React.FC<InfoTabStatusProps> = ({
     }, GAMEPLAY_CONFIG.infoWindowUpdateInterval * 1000);
 
     return () => clearInterval(interval);
-  }, [isCurrentlySelected, targetId, world]);
+  }, [isCurrentlySelected, targetId, hudProvider]);
 
   const { currentHp, maxHp, isHumanoid, partColors, partFp } = snapshot;
 

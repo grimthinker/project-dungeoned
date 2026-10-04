@@ -121,9 +121,9 @@ export class GrassSyncSystem {
         activeIds.add(chunkId);
 
         const mustRebuild =
-          terrainComp.dirtyChunks.has(chunkId) ||
-          terrainComp.isFoliageDirty ||
-          terrainComp.isGeometryDirty;
+          Boolean(terrainComp.dirtyChunks?.has(chunkId)) ||
+          Boolean(terrainComp.isFoliageDirty) ||
+          Boolean(terrainComp.isGeometryDirty);
 
         let chunk = this.chunks.get(chunkId);
         if (!chunk) {

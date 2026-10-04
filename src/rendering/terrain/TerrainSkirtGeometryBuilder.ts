@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { TerrainComponent, getTerrainHeightAt } from '../../ecs/components/terrain';
+import { TerrainData } from '../../types';
+import { getTerrainHeightAt } from '../../utils';
 import { TERRAIN_CONFIG } from '../../config/terrainConfig';
 
 function calculateHillHeight(x: number, z: number, distFromBorder: number): number {
@@ -25,7 +26,7 @@ function calculateHillHeight(x: number, z: number, distFromBorder: number): numb
 }
 
 export class TerrainSkirtGeometryBuilder {
-  public static buildGeometry(terrainComp: TerrainComponent): THREE.BufferGeometry {
+  public static buildGeometry(terrainComp: TerrainData): THREE.BufferGeometry {
     const cfg = TERRAIN_CONFIG.skirt;
     const segments = cfg.segments;
     const rings = cfg.rings;
@@ -138,10 +139,7 @@ export class TerrainSkirtGeometryBuilder {
     return geometry;
   }
 
-  public static updateEdgeHeights(
-    geometry: THREE.BufferGeometry,
-    terrainComp: TerrainComponent
-  ): void {
+  public static updateEdgeHeights(geometry: THREE.BufferGeometry, terrainComp: TerrainData): void {
     const posAttr = geometry.attributes.position;
     const cfg = TERRAIN_CONFIG.skirt;
     const segments = cfg.segments;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BodyStructureType } from '../../ecs/templates';
+import { BodyStructureType } from '../../types';
 import { CREATURE_RIG_PROFILES } from '../rigProfiles';
 import { AssetManager } from '../AssetManager';
 import { computeLocalBox, computeDetachedLimbGrip } from '../gripCalculators';

@@ -19,8 +19,10 @@ import { calculateThrowVelocity } from './utils';
 import { FPSMonitor } from './core/FPSMonitor';
 import { IEditorContext, ISelectionHostContext } from './core/contexts';
 import { ICommand } from './history/ICommand';
+import { HudAdapter } from './HudAdapter';
 
 export { EntityAdapter } from './EntityAdapter';
+export { HudAdapter } from './HudAdapter';
 
 export class GameApp implements IEditorContext, ISelectionHostContext {
   private container: HTMLDivElement;
@@ -31,6 +33,7 @@ export class GameApp implements IEditorContext, ISelectionHostContext {
   public simulation: GameSimulation;
   public editor: EditorInteractionManager;
   public fpsMonitor: FPSMonitor = new FPSMonitor();
+  public hudAdapter: HudAdapter;
 
   public throwTargeting: { slotIndex: number; partId: string; itemId: string } | null = null;
   private mouseScreenPos: Point | null = null;
@@ -204,6 +207,7 @@ export class GameApp implements IEditorContext, ISelectionHostContext {
     this.simulation = new GameSimulation(this);
     this.editor = new EditorInteractionManager(this);
     this.time = new TimeManager(this);
+    this.hudAdapter = new HudAdapter(this.simulation.world, this);
 
     this.resizeCanvas();
     window.addEventListener('resize', this.handleResize);

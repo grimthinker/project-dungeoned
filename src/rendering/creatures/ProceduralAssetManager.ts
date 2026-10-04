@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { BodyStructureType } from '../../ecs/templates';
+import { BodyStructureType } from '../../types';
 import { IProceduralCreatureBuilder } from './IProceduralBuilder';
 import { QuadrupedProceduralBuilder } from './QuadrupedProceduralBuilder';
 import { HumanoidProceduralBuilder } from './HumanoidProceduralBuilder';

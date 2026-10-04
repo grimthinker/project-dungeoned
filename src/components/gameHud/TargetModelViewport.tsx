@@ -1,35 +1,29 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { World } from '../../ecs/World';
 import { GameApp } from '../../GameApp';
 import { AssetManager } from '../../rendering/AssetManager';
 import { CREATURE_RIG_PROFILES } from '../../rendering/rigProfiles';
 import { BodyStructureType } from '../../ecs/templates';
 import { ProceduralCreatureAssetManager } from '../../rendering/creatures/ProceduralAssetManager';
-import {
-  computeLocalBox,
-  computeItemGrip,
-  computeDetachedLimbGrip,
-  GripTransform,
-} from '../../rendering/gripCalculators';
+import { computeLocalBox, computeItemGrip } from '../../rendering/gripCalculators';
 import {
   disposeObject,
   attachOutlines,
   createOutlineShaderMaterial,
 } from '../../rendering/renderUtils';
-import { getAggregatedInteractionSlots } from '../../ecs/utils/hierarchy';
 import { ToonMaterialManager } from '../../rendering/materials/ToonMaterialManager';
+import { IHudDataProvider } from './hudPorts';
 
 export interface TargetModelViewportProps {
   app?: GameApp | null;
-  world: World | null | undefined;
+  hudProvider: IHudDataProvider;
   targetId: string;
   playerId: string | null;
 }
 
 export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
   app,
-  world,
+  hudProvider,
   targetId,
   playerId,
 }) => {
@@ -115,49 +109,43 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
     };
   }, []);
 
-  // Вспомогательная функция синхронизации предметов в сокетах рук
   const syncSocketItems = async (rig: THREE.Object3D, currentTargetId: string) => {
-    if (!world) return;
-    const aggSlots = getAggregatedInteractionSlots(world, currentTargetId);
-    const newHash = aggSlots.map((s) => `${s.slot.rigSocketName}:${s.slot.itemId}`).join('|');
+    const data = hudProvider.getTargetModelData(currentTargetId, playerId);
+    if (!data) return;
+
+    const newHash = data.socketItems.map((s) => `${s.socketName}:${s.itemId}`).join('|');
     if (newHash === socketItemsHashRef.current) return;
     socketItemsHashRef.current = newHash;
 
-    for (const info of aggSlots) {
-      if (!info.slot.rigSocketName) continue;
-      const socketBone = rig.getObjectByName(info.slot.rigSocketName);
+    for (const info of data.socketItems) {
+      if (!info.socketName) continue;
+      const socketBone = rig.getObjectByName(info.socketName);
       if (!socketBone) continue;
 
-      // Очищаем старые прикрепленные меши из кости
       while (socketBone.children.length > 0) {
         const child = socketBone.children[0];
         socketBone.remove(child);
         disposeObject(child);
       }
 
-      if (info.slot.itemId) {
-        const itemVisual = world.getComponent(info.slot.itemId, 'visualModel');
-        const itemComp = world.getComponent(info.slot.itemId, 'item');
-        if (itemVisual?.modelId) {
-          const itemMesh = await AssetManager.getInstance().getClonedModel(itemVisual.modelId);
-          if (itemMesh) {
-            const grip = computeItemGrip(itemMesh, itemComp?.type);
-            itemMesh.position.copy(grip.position);
-            itemMesh.quaternion.copy(grip.quaternion);
+      if (info.modelId) {
+        const itemMesh = await AssetManager.getInstance().getClonedModel(info.modelId);
+        if (itemMesh) {
+          const grip = computeItemGrip(itemMesh, info.itemType);
+          itemMesh.position.copy(grip.position);
+          itemMesh.quaternion.copy(grip.quaternion);
 
-            if (app?.celShading) {
-              ToonMaterialManager.getInstance().applyToon(itemMesh);
-            }
-            socketBone.add(itemMesh);
+          if (app?.celShading) {
+            ToonMaterialManager.getInstance().applyToon(itemMesh);
           }
+          socketBone.add(itemMesh);
         }
       }
     }
   };
 
-  // 2. Первичная загрузка геометрии и структуры модели
   useEffect(() => {
-    if (!world || !sceneRef.current || !modelGroupRef.current) return;
+    if (!sceneRef.current || !modelGroupRef.current) return;
     const modelGroup = modelGroupRef.current;
 
     if (mixerRef.current) {
@@ -174,16 +162,14 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
     let isCancelled = false;
 
     const loadTargetModel = async () => {
-      const animator = world.getComponent(targetId, 'animator');
-      const visual = world.getComponent(targetId, 'visualModel');
-      const tag = world.getComponent(targetId, 'tag');
-      const assembly = world.getComponent(targetId, 'assemblyRoot');
+      const data = hudProvider.getTargetModelData(targetId, playerId);
+      if (!data) return;
 
       let loadedObject: THREE.Object3D | null = null;
-      const structureType = (animator?.rigType || visual?.rigType) as BodyStructureType | undefined;
+      const structureType = (data.animator?.rigType || data.rigType) as
+        BodyStructureType | undefined;
       const rigProfile = structureType ? CREATURE_RIG_PROFILES[structureType] : undefined;
 
-      // А. Существо с анимационным ригом
       if (structureType && rigProfile?.rigAsset) {
         const rig = await AssetManager.getInstance().getClonedModel(rigProfile.rigAsset);
         if (isCancelled || !rig) return;
@@ -191,21 +177,16 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
         rig.scale.set(1, 1, 1);
         rig.rotation.y = Math.PI / 2;
 
-        if (assembly && assembly.partIds) {
-          for (const partId of assembly.partIds) {
-            const partVisual = world.getComponent(partId, 'visualModel');
-            if (partVisual?.modelId && partVisual.rigNodeName) {
-              const targetNode = rig.getObjectByName(partVisual.rigNodeName);
-              if (targetNode) {
-                const meshClone = await AssetManager.getInstance().getClonedModel(
-                  partVisual.modelId
-                );
-                if (!isCancelled && meshClone) {
-                  if (meshClone.type === 'Scene' || meshClone.type === 'Group') {
-                    targetNode.add(...meshClone.children);
-                  } else {
-                    targetNode.add(meshClone);
-                  }
+        if (data.parts) {
+          for (const part of data.parts) {
+            const targetNode = rig.getObjectByName(part.rigNodeName);
+            if (targetNode) {
+              const meshClone = await AssetManager.getInstance().getClonedModel(part.modelId);
+              if (!isCancelled && meshClone) {
+                if (meshClone.type === 'Scene' || meshClone.type === 'Group') {
+                  targetNode.add(...meshClone.children);
+                } else {
+                  targetNode.add(meshClone);
                 }
               }
             }
@@ -215,27 +196,20 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
         const mixer = new THREE.AnimationMixer(rig);
         mixerRef.current = mixer;
 
-        // Синхронизируем предметы в руках
         await syncSocketItems(rig, targetId);
 
         loadedObject = rig;
-      }
-      // Б. Предмет или проп (мяч, меч, бочка, ящик)
-      else if (visual?.modelId) {
-        const clone = await AssetManager.getInstance().getClonedModel(visual.modelId);
+      } else if (data.visualModelId) {
+        const clone = await AssetManager.getInstance().getClonedModel(data.visualModelId);
         if (!isCancelled && clone) {
           loadedObject = clone;
         }
-      }
-      // В. Фоллбэк
-      else {
-        const physStats = world.getComponent(targetId, 'physicsStats');
-        const r = physStats?.radius.current ?? 0.4;
-        const h = physStats?.height?.current ?? 1.5;
-        const geo =
-          tag?.archetype === 'creature'
-            ? new THREE.CylinderGeometry(r, r, h, 16)
-            : new THREE.BoxGeometry(r * 2, h, r * 2);
+      } else {
+        const r = data.physicsRadius ?? 0.4;
+        const h = data.physicsHeight ?? 1.5;
+        const geo = data.isCreature
+          ? new THREE.CylinderGeometry(r, r, h, 16)
+          : new THREE.BoxGeometry(r * 2, h, r * 2);
         const mat = new THREE.MeshStandardMaterial({ color: 0x3498db, roughness: 0.6 });
         loadedObject = new THREE.Mesh(geo, mat);
         loadedObject.position.y = h / 2;
@@ -262,7 +236,7 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [targetId, world, app?.celShading]);
+  }, [targetId, hudProvider, playerId, app?.celShading]);
 
   // 3. Покадровое копирование движений, положения головы, вращения и ракурса
   useEffect(() => {
@@ -272,16 +246,11 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
       const dt = (time - lastTime) / 1000;
       lastTime = time;
 
-      if (
-        world &&
-        sceneRef.current &&
-        cameraRef.current &&
-        rendererRef.current &&
-        modelGroupRef.current
-      ) {
-        const playerTrans = playerId ? world.getComponent(playerId, 'transform') : undefined;
-        const targetTrans = world.getComponent(targetId, 'transform');
-        const animatorComp = world.getComponent(targetId, 'animator');
+      if (sceneRef.current && cameraRef.current && rendererRef.current && modelGroupRef.current) {
+        const modelData = hudProvider.getTargetModelData(targetId, playerId);
+        const playerTrans = modelData?.playerTransform;
+        const targetTrans = modelData?.transform;
+        const animatorComp = modelData?.animator;
         const rig = modelGroupRef.current.children[0];
 
         // А. Синхронизация скелетной анимации и положения головы для существ
@@ -320,7 +289,7 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
           mixerRef.current.update(dt);
 
           // Наложение точного поворота головы (Pitch/Yaw) из headOrientation
-          const headOrientation = world.getComponent(targetId, 'headOrientation');
+          const headOrientation = modelData?.headOrientation;
           if (headBone && headOrientation) {
             const headPitch = headOrientation.relativePitch ?? 0;
             const headYaw = headOrientation.relativeYaw ?? 0;
@@ -387,7 +356,7 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
 
     rafIdRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(rafIdRef.current);
-  }, [world, targetId, playerId, zoomFactor, app?.celShading]);
+  }, [hudProvider, targetId, playerId, zoomFactor, app?.celShading]);
 
   return (
     <div

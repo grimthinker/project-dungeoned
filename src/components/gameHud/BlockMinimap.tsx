@@ -1,24 +1,18 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { RETRO_PANEL_STYLE, RETRO_SUNKEN_STYLE, RETRO_HEADER_STYLE } from './RetroStyles';
-import { World } from '../../ecs/World';
 import { EventBus } from '../../core/EventBus';
 import { Camera } from '../../Camera';
 import { BALANCE_CONFIG } from '../../config/balanceConfig';
-import {
-  generateTopographyCanvas,
-  getCameraFrustumGroundCorners,
-  WaterBodyData,
-  ObstacleMapData,
-} from './BlockMap';
+import { generateTopographyCanvas, getCameraFrustumGroundCorners } from './BlockMap';
+import { IHudDataProvider } from './hudPorts';
 
 export interface BlockMinimapProps {
-  world?: World | null | undefined;
+  hudProvider: IHudDataProvider;
   playerId?: string | null;
   camera?: Camera | null | undefined;
 }
 
-export const BlockMinimap: React.FC<BlockMinimapProps> = ({ world, playerId, camera }) => {
-  // Видимый размер фрагмента карты в метрах (в пределах min/max из баланс-конфига)
+export const BlockMinimap: React.FC<BlockMinimapProps> = ({ hudProvider, playerId, camera }) => {
   const [viewSizeMeters, setViewSizeMeters] = useState<number>(
     BALANCE_CONFIG.minimap.defaultViewMeters
   );
@@ -58,10 +52,9 @@ export const BlockMinimap: React.FC<BlockMinimapProps> = ({ world, playerId, cam
     return unsub;
   }, []);
 
-  // Отрисовка миникарты в реальном времени
   const renderMinimap = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !world) return;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -71,82 +64,28 @@ export const BlockMinimap: React.FC<BlockMinimapProps> = ({ world, playerId, cam
     ctx.fillStyle = '#1e241e';
     ctx.fillRect(0, 0, w, h);
 
-    const terrainEntities = world.getEntitiesWith('terrain');
-    const terrain = terrainEntities.length > 0 ? terrainEntities[0][1].terrain : undefined;
+    const snapshot = hudProvider.getMapSnapshot(playerId ?? null);
+    const terrain = snapshot.terrain;
 
-    // Обновление запеченной топографии при изменении геометрии рельефа или объектов
     const currentVersion = terrain?.geometryVersion ?? 0;
     if (
       terrain &&
       (!cachedTerrainCanvasRef.current || lastTerrainVersionRef.current !== currentVersion)
     ) {
-      const waterEntities = world.getEntitiesWith('water', 'transform');
-      const waters: WaterBodyData[] = waterEntities.map(([, c]) => ({
-        width: c.water.width,
-        depth: c.water.depth,
-        x: c.transform.x,
-        z: c.transform.z,
-        surfaceY: c.transform.y,
-        angle: c.transform.angle ?? 0,
-      }));
-
-      const obstacleEntities = world.getEntitiesWith('tag', 'transform');
-      const obstacles: ObstacleMapData[] = [];
-      for (const [id, comp] of obstacleEntities) {
-        if (comp.tag.archetype !== 'obstacle') continue;
-        const visual = world.getComponent(id, 'visualModel');
-        const physStats = world.getComponent(id, 'physicsStats');
-        const meta = world.getComponent(id, 'meta');
-
-        const modelId = visual?.modelId;
-        const r = physStats?.radius.current ?? 1.0;
-        let widthVal = r * 2;
-        let depthVal = r * 2;
-
-        if (physStats?.points && physStats.points.length > 0) {
-          let minX = physStats.points[0].x;
-          let maxX = physStats.points[0].x;
-          let minY = physStats.points[0].y;
-          let maxY = physStats.points[0].y;
-          for (let pi = 1; pi < physStats.points.length; pi++) {
-            const pt = physStats.points[pi];
-            if (pt.x < minX) minX = pt.x;
-            if (pt.x > maxX) maxX = pt.x;
-            if (pt.y < minY) minY = pt.y;
-            if (pt.y > maxY) maxY = pt.y;
-          }
-          widthVal = Math.max(0.2, maxX - minX);
-          depthVal = Math.max(0.2, maxY - minY);
-        }
-
-        obstacles.push({
-          id,
-          subType: comp.tag.subType,
-          modelId,
-          name: meta?.name,
-          x: comp.transform.x,
-          z: comp.transform.z,
-          angle: comp.transform.angle ?? 0,
-          radius: r,
-          width: widthVal,
-          depth: depthVal,
-          points: physStats?.points,
-        });
-      }
-
-      cachedTerrainCanvasRef.current = generateTopographyCanvas(terrain, waters, obstacles);
+      cachedTerrainCanvasRef.current = generateTopographyCanvas(
+        terrain as any,
+        snapshot.waters,
+        snapshot.obstacles
+      );
       lastTerrainVersionRef.current = currentVersion;
     }
 
-    // Игрок находится строго по центру экрана миникарты
-    const playerTrans = playerId ? world.getComponent(playerId, 'transform') : undefined;
-    const centerX = playerTrans?.x ?? 0;
-    const centerZ = playerTrans?.z ?? 0;
+    const centerX = snapshot.playerPos?.x ?? 0;
+    const centerZ = snapshot.playerPos?.z ?? 0;
 
     const terrainW = terrain?.width ?? 100;
     const terrainD = terrain?.depth ?? 100;
 
-    // Пикселей на метр, исходя из текущего охвата viewSizeMeters
     const ppm = Math.min(w, h) / viewSizeMeters;
 
     const worldToScreen = (wx: number, wz: number) => ({
@@ -161,31 +100,24 @@ export const BlockMinimap: React.FC<BlockMinimapProps> = ({ world, playerId, cam
       const mapDrawH = terrainD * ppm;
 
       ctx.drawImage(cachedTerrainCanvasRef.current, topLeft.x, topLeft.y, mapDrawW, mapDrawH);
-
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 2;
       ctx.strokeRect(topLeft.x, topLeft.y, mapDrawW, mapDrawH);
     }
 
     // 2. Игровые зоны
-    const zones = world.getEntitiesWith('gameplayZone', 'transform');
-    for (const [zId, { gameplayZone, transform }] of zones) {
-      const pos = worldToScreen(transform.x, transform.z);
-      const shape = world.getComponent(zId, 'zoneShape');
-      const r = (shape?.radius ?? 3.0) * ppm;
+    for (const zone of snapshot.zones) {
+      const pos = worldToScreen(zone.x, zone.z);
+      const r = zone.radius * ppm;
 
       ctx.fillStyle =
-        gameplayZone.role === 'quest'
+        zone.role === 'quest'
           ? 'rgba(0, 229, 255, 0.25)'
-          : gameplayZone.role === 'throw_target'
+          : zone.role === 'throw_target'
             ? 'rgba(230, 126, 34, 0.25)'
             : 'rgba(241, 196, 15, 0.2)';
       ctx.strokeStyle =
-        gameplayZone.role === 'quest'
-          ? '#00e5ff'
-          : gameplayZone.role === 'throw_target'
-            ? '#e67e22'
-            : '#f1c40f';
+        zone.role === 'quest' ? '#00e5ff' : zone.role === 'throw_target' ? '#e67e22' : '#f1c40f';
       ctx.lineWidth = 1.5;
 
       ctx.beginPath();
@@ -194,18 +126,11 @@ export const BlockMinimap: React.FC<BlockMinimapProps> = ({ world, playerId, cam
       ctx.stroke();
     }
 
-    // 3. Другие существа (только живые существа, исключая препятствия)
-    const creatures = world.getEntitiesWith('meta', 'transform', 'health');
-    for (const [cId, { meta, transform, health }] of creatures) {
-      if (cId === playerId) continue;
+    // 3. Другие существа
+    for (const creature of snapshot.creatures) {
+      const pos = worldToScreen(creature.x, creature.z);
 
-      const tag = world.getComponent(cId, 'tag');
-      const arch = tag?.archetype ?? meta.entityType;
-      if (arch !== 'creature') continue;
-
-      const pos = worldToScreen(transform.x, transform.z);
-
-      if (!health.isAlive) {
+      if (!creature.isAlive) {
         ctx.strokeStyle = '#7f8c8d';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
@@ -217,12 +142,7 @@ export const BlockMinimap: React.FC<BlockMinimapProps> = ({ world, playerId, cam
         continue;
       }
 
-      const ai = world.getComponent(cId, 'aiStats');
-      const isAttacker = ai?.behavior.current === 'AttackerTree';
-      const isDog =
-        meta.name.toLowerCase().includes('собака') || meta.name.toLowerCase().includes('dog');
-
-      ctx.fillStyle = isAttacker ? '#e74c3c' : isDog ? '#e67e22' : '#3498db';
+      ctx.fillStyle = creature.isAttacker ? '#e74c3c' : creature.isDog ? '#e67e22' : '#3498db';
       ctx.strokeStyle = '#111';
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -268,9 +188,9 @@ export const BlockMinimap: React.FC<BlockMinimapProps> = ({ world, playerId, cam
     }
 
     // 5. Маркер игрока по центру
-    if (playerTrans) {
+    if (snapshot.playerPos) {
       const pPos = worldToScreen(centerX, centerZ);
-      const angle = playerTrans.angle;
+      const angle = snapshot.playerPos.angle;
 
       ctx.save();
       ctx.translate(pPos.x, pPos.y);
@@ -306,7 +226,7 @@ export const BlockMinimap: React.FC<BlockMinimapProps> = ({ world, playerId, cam
     ctx.font = 'bold 9px monospace';
     ctx.textAlign = 'left';
     ctx.fillText(`${Math.round(viewSizeMeters)}x${Math.round(viewSizeMeters)} м`, 8, h - 8);
-  }, [world, playerId, viewSizeMeters, camera]);
+  }, [hudProvider, playerId, viewSizeMeters, camera]);
 
   // Анимационный цикл перерисовки
   useEffect(() => {

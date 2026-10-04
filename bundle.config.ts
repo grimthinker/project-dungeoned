@@ -49,18 +49,41 @@ export const DOMAINS = {
     'src/utils.ts',
   ],
 
-  // 5. UI, HUD и Инспектор
-  ui: [
-    'src/components/**/*',
-    'src/hooks/**/*',
-    'src/editor/**/*',
-    'src/core/**/*',
+  // 5. Игровой интерфейс (Game HUD - чистый UI без ECS)
+  gameHud: [
+    'src/components/gameHud/**/*',
+    'src/components/GameHUD.tsx',
+    'src/config/hudConfig.ts',
+    'src/config/gameplayConfig.ts',
+    'src/config/balanceConfig.ts',
     'src/types.ts',
     'src/utils.ts',
     'src/locales/**/*',
   ],
 
-  // 6. Физическое ядро и адаптер ECS
+  // 6. UI редактора и общие элементы интерфейса
+  ui: [
+    'src/components/Inspector.tsx',
+    'src/components/inspector/**/*',
+    'src/components/LeftDock/**/*',
+    'src/components/PieMenu/**/*',
+    'src/components/TopBar.tsx',
+    'src/components/MainMenu.tsx',
+    'src/components/HotkeysModal.tsx',
+    'src/components/CanvasHUD.tsx',
+    'src/components/MultiSelectionDrawer.tsx',
+    'src/components/canvas/**/*',
+    'src/components/modals/**/*',
+    'src/dnd/**/*',
+    'src/hooks/**/*',
+    'src/editor/**/*',
+    'src/core/contexts.ts',
+    'src/types.ts',
+    'src/utils.ts',
+    'src/locales/**/*',
+  ],
+
+  // 7. Физическое ядро и адаптер ECS
   physics: [
     'src/physics/**/*',
     'src/ecs/systems/PhysicsSystem.ts',

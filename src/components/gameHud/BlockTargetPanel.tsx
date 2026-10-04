@@ -1,47 +1,37 @@
 import React from 'react';
-import { World } from '../../ecs/World';
 import { GameApp } from '../../GameApp';
 import { TargetModelViewport } from './TargetModelViewport';
 import { RETRO_PANEL_STYLE, RETRO_HEADER_STYLE, RETRO_BUTTON_STYLE } from './RetroStyles';
 import { t } from '../../locales';
+import { IHudDataProvider } from './hudPorts';
 
 export interface BlockTargetPanelProps {
   app?: GameApp | null;
-  world: World | null | undefined;
+  hudProvider: IHudDataProvider;
   targetId: string;
   onOpenInspect: (targetId: string) => void;
 }
 
 export const BlockTargetPanel: React.FC<BlockTargetPanelProps> = ({
   app,
-  world,
+  hudProvider,
   targetId,
   onOpenInspect,
 }) => {
-  if (!world || !world.hasEntity(targetId)) return null;
+  const targetInfo = hudProvider.getTargetPanelInfo(targetId);
+  if (!targetInfo) return null;
 
   const playerId = app ? app.getPlayerEntityId() : null;
-  const tag = world.getComponent(targetId, 'tag');
-  const meta = world.getComponent(targetId, 'meta');
-  const item = world.getComponent(targetId, 'item');
-  const interactable = world.getComponent(targetId, 'interactable');
-
-  const archetype = tag?.archetype ?? meta?.entityType;
-  const isCreature = archetype === 'creature';
-  const isItem = archetype === 'item' || !!item;
-
-  const targetName = meta?.name ?? item?.name ?? targetId;
+  const { name: targetName, isCreature, isItem } = targetInfo;
 
   const handleTake = () => {
-    if (app && playerId) {
-      app.updateEntityBlackboard(playerId, 'requestedPickupId', targetId);
+    if (playerId) {
+      hudProvider.pickupItem(playerId, targetId);
     }
   };
 
   const handleDeselect = () => {
-    if (app) {
-      app.selection.selectGameTarget(null);
-    }
+    hudProvider.selectTarget(null);
   };
 
   return (
@@ -101,7 +91,12 @@ export const BlockTargetPanel: React.FC<BlockTargetPanelProps> = ({
           backgroundColor: '#141414',
         }}
       >
-        <TargetModelViewport app={app} world={world} targetId={targetId} playerId={playerId} />
+        <TargetModelViewport
+          app={app}
+          hudProvider={hudProvider}
+          targetId={targetId}
+          playerId={playerId}
+        />
       </div>
 
       {/* Кнопки действий цели */}

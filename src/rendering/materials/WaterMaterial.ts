@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { WaterComponent } from '../../ecs/components/water';
+import { WaterData } from '../../types';
 import { GRAPHICS_CONFIG } from '../../config/graphicsConfig';
 
 export function createWaterMaterial(
-  comp: WaterComponent,
+  comp: WaterData,
   rippleTexture?: THREE.Texture | null
 ): THREE.ShaderMaterial {
   const baseColor = new THREE.Color(comp.color || '#3498db');

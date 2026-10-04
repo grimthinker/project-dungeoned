@@ -1,41 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { RetroWindow } from './RetroWindow';
 import { RETRO_SUNKEN_STYLE } from './RetroStyles';
-import { World } from '../../ecs/World';
-import { TerrainComponent, getTerrainHeightAt } from '../../ecs/components/terrain';
 import { EventBus } from '../../core/EventBus';
 import { Camera } from '../../Camera';
 import { Point } from '../../types';
+import { getTerrainHeightAt } from '../../utils';
+import { IHudDataProvider, WaterBodyData, ObstacleMapData } from './hudPorts';
+
+export type { WaterBodyData, ObstacleMapData };
 
 export interface BlockMapProps {
   isOpen: boolean;
   onClose: () => void;
-  world?: World | null | undefined;
+  hudProvider: IHudDataProvider;
   playerId?: string | null;
   camera?: Camera | null | undefined;
-}
-
-export interface WaterBodyData {
-  width: number;
-  depth: number;
-  x: number;
-  z: number;
-  surfaceY: number;
-  angle: number;
-}
-
-export interface ObstacleMapData {
-  id: string;
-  subType?: string;
-  modelId?: string;
-  name?: string;
-  x: number;
-  z: number;
-  angle: number;
-  radius: number;
-  width: number;
-  depth: number;
-  points?: Point[];
 }
 
 /**
@@ -43,7 +22,14 @@ export interface ObstacleMapData {
  * с имитацией рельефа, высот, текстурных слоев дорог/песка/травы и препятствий сверху.
  */
 export function generateTopographyCanvas(
-  terrain: TerrainComponent,
+  terrain: {
+    width: number;
+    depth: number;
+    resolution: number;
+    splatResolution: number;
+    heights: Float32Array;
+    splatData: Uint8Array;
+  },
   waterBodies: WaterBodyData[],
   obstacles: ObstacleMapData[]
 ): HTMLCanvasElement {
@@ -516,14 +502,19 @@ export function getCameraFrustumGroundCorners(
   });
 }
 
-export const BlockMap: React.FC<BlockMapProps> = ({ isOpen, onClose, world, playerId, camera }) => {
+export const BlockMap: React.FC<BlockMapProps> = ({
+  isOpen,
+  onClose,
+  hudProvider,
+  playerId,
+  camera,
+}) => {
   const defaultX =
     typeof window !== 'undefined' ? Math.max(20, (window.innerWidth - 560) / 2) : 200;
   const defaultY =
     typeof window !== 'undefined' ? Math.max(20, (window.innerHeight - 500) / 2) : 100;
 
   const [zoom, setZoom] = useState<number>(1.0);
-  // Автономный центр карты (не привязан к перемещению игрока)
   const [mapCenter, setMapCenter] = useState<{ x: number; z: number }>({ x: 0, z: 0 });
   const [isLmbDragging, setIsLmbDragging] = useState<boolean>(false);
 
@@ -543,17 +534,16 @@ export const BlockMap: React.FC<BlockMapProps> = ({ isOpen, onClose, world, play
     centerZ: 0,
   });
 
-  // При первом открытии центрируем карту на игроке
   const hasInitializedCenterRef = useRef(false);
   useEffect(() => {
-    if (isOpen && !hasInitializedCenterRef.current && world && playerId) {
-      const pTrans = world.getComponent(playerId, 'transform');
-      if (pTrans) {
-        setMapCenter({ x: pTrans.x, z: pTrans.z });
+    if (isOpen && !hasInitializedCenterRef.current && playerId) {
+      const snapshot = hudProvider.getMapSnapshot(playerId);
+      if (snapshot.playerPos) {
+        setMapCenter({ x: snapshot.playerPos.x, z: snapshot.playerPos.z });
         hasInitializedCenterRef.current = true;
       }
     }
-  }, [isOpen, world, playerId]);
+  }, [isOpen, hudProvider, playerId]);
 
   // Зум колесиком мыши: привязан к [isOpen] для гарантированного подключения при каждом открытии окна
   useEffect(() => {
@@ -593,11 +583,10 @@ export const BlockMap: React.FC<BlockMapProps> = ({ isOpen, onClose, world, play
     e.stopPropagation();
 
     const canvas = canvasRef.current;
-    if (!canvas || !world) return;
+    if (!canvas) return;
 
-    const terrainEntities = world.getEntitiesWith('terrain');
-    const terrain = terrainEntities.length > 0 ? terrainEntities[0][1].terrain : undefined;
-    const terrainW = terrain?.width ?? 100;
+    const snapshot = hudProvider.getMapSnapshot(playerId ?? null);
+    const terrainW = snapshot.terrain?.width ?? 100;
     const ppm = (Math.min(canvas.width, canvas.height) / terrainW) * zoom;
 
     const dxPx = e.clientX - dragStartRef.current.clientX;
@@ -615,21 +604,19 @@ export const BlockMap: React.FC<BlockMapProps> = ({ isOpen, onClose, world, play
 
   const handleCenterOnPlayer = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (world && playerId) {
-      const pTrans = world.getComponent(playerId, 'transform');
-      if (pTrans) {
-        setMapCenter({ x: pTrans.x, z: pTrans.z });
+    if (playerId) {
+      const snapshot = hudProvider.getMapSnapshot(playerId);
+      if (snapshot.playerPos) {
+        setMapCenter({ x: snapshot.playerPos.x, z: snapshot.playerPos.z });
       }
     }
   };
 
-  // Отрисовка карты в реальном времени с синхронизацией буфера холста
   const renderMap = useCallback(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
-    if (!canvas || !world) return;
+    if (!canvas) return;
 
-    // Мгновенная синхронизация разрешения буфера холста с размером контейнера
     if (container && container.clientWidth > 0 && container.clientHeight > 0) {
       if (canvas.width !== container.clientWidth || canvas.height !== container.clientHeight) {
         canvas.width = container.clientWidth;
@@ -646,74 +633,22 @@ export const BlockMap: React.FC<BlockMapProps> = ({ isOpen, onClose, world, play
     ctx.fillStyle = '#1e241e';
     ctx.fillRect(0, 0, w, h);
 
-    const terrainEntities = world.getEntitiesWith('terrain');
-    const terrain = terrainEntities.length > 0 ? terrainEntities[0][1].terrain : undefined;
+    const snapshot = hudProvider.getMapSnapshot(playerId ?? null);
+    const terrain = snapshot.terrain;
 
-    // 1. Обновление фоновой топографической текстуры при изменении рельефа и препятствий
     const currentVersion = terrain?.geometryVersion ?? 0;
     if (
       terrain &&
       (!cachedTerrainCanvasRef.current || lastTerrainVersionRef.current !== currentVersion)
     ) {
-      const waterEntities = world.getEntitiesWith('water', 'transform');
-      const waters: WaterBodyData[] = waterEntities.map(([, c]) => ({
-        width: c.water.width,
-        depth: c.water.depth,
-        x: c.transform.x,
-        z: c.transform.z,
-        surfaceY: c.transform.y,
-        angle: c.transform.angle ?? 0,
-      }));
-
-      const obstacleEntities = world.getEntitiesWith('tag', 'transform');
-      const obstacles: ObstacleMapData[] = [];
-      for (const [id, comp] of obstacleEntities) {
-        if (comp.tag.archetype !== 'obstacle') continue;
-        const visual = world.getComponent(id, 'visualModel');
-        const physStats = world.getComponent(id, 'physicsStats');
-        const meta = world.getComponent(id, 'meta');
-
-        const modelId = visual?.modelId;
-        const r = physStats?.radius.current ?? 1.0;
-        let widthVal = r * 2;
-        let depthVal = r * 2;
-
-        if (physStats?.points && physStats.points.length > 0) {
-          let minX = physStats.points[0].x;
-          let maxX = physStats.points[0].x;
-          let minY = physStats.points[0].y;
-          let maxY = physStats.points[0].y;
-          for (let pi = 1; pi < physStats.points.length; pi++) {
-            const pt = physStats.points[pi];
-            if (pt.x < minX) minX = pt.x;
-            if (pt.x > maxX) maxX = pt.x;
-            if (pt.y < minY) minY = pt.y;
-            if (pt.y > maxY) maxY = pt.y;
-          }
-          widthVal = Math.max(0.2, maxX - minX);
-          depthVal = Math.max(0.2, maxY - minY);
-        }
-
-        obstacles.push({
-          id,
-          subType: comp.tag.subType,
-          modelId,
-          name: meta?.name,
-          x: comp.transform.x,
-          z: comp.transform.z,
-          angle: comp.transform.angle ?? 0,
-          radius: r,
-          width: widthVal,
-          depth: depthVal,
-          points: physStats?.points,
-        });
-      }
-
-      cachedTerrainCanvasRef.current = generateTopographyCanvas(terrain, waters, obstacles);
+      cachedTerrainCanvasRef.current = generateTopographyCanvas(
+        terrain as any,
+        snapshot.waters,
+        snapshot.obstacles
+      );
       lastTerrainVersionRef.current = currentVersion;
     }
 
-    // Центр окна карты берется из автономного mapCenter
     const centerX = mapCenter.x;
     const centerZ = mapCenter.z;
 
@@ -735,31 +670,24 @@ export const BlockMap: React.FC<BlockMapProps> = ({ isOpen, onClose, world, play
       const mapDrawH = terrainD * ppm;
 
       ctx.drawImage(cachedTerrainCanvasRef.current, topLeft.x, topLeft.y, mapDrawW, mapDrawH);
-
       ctx.strokeStyle = '#222';
       ctx.lineWidth = 2;
       ctx.strokeRect(topLeft.x, topLeft.y, mapDrawW, mapDrawH);
     }
 
     // 3. Отрисовка игровых зон
-    const zones = world.getEntitiesWith('gameplayZone', 'transform');
-    for (const [zId, { gameplayZone, transform }] of zones) {
-      const pos = worldToScreen(transform.x, transform.z);
-      const shape = world.getComponent(zId, 'zoneShape');
-      const r = (shape?.radius ?? 3.0) * ppm;
+    for (const zone of snapshot.zones) {
+      const pos = worldToScreen(zone.x, zone.z);
+      const r = zone.radius * ppm;
 
       ctx.fillStyle =
-        gameplayZone.role === 'quest'
+        zone.role === 'quest'
           ? 'rgba(0, 229, 255, 0.25)'
-          : gameplayZone.role === 'throw_target'
+          : zone.role === 'throw_target'
             ? 'rgba(230, 126, 34, 0.25)'
             : 'rgba(241, 196, 15, 0.2)';
       ctx.strokeStyle =
-        gameplayZone.role === 'quest'
-          ? '#00e5ff'
-          : gameplayZone.role === 'throw_target'
-            ? '#e67e22'
-            : '#f1c40f';
+        zone.role === 'quest' ? '#00e5ff' : zone.role === 'throw_target' ? '#e67e22' : '#f1c40f';
       ctx.lineWidth = 1.5;
 
       ctx.beginPath();
@@ -768,18 +696,11 @@ export const BlockMap: React.FC<BlockMapProps> = ({ isOpen, onClose, world, play
       ctx.stroke();
     }
 
-    // 4. Отрисовка других существ (препятствия и предметы исключены)
-    const creatures = world.getEntitiesWith('meta', 'transform', 'health');
-    for (const [cId, { meta, transform, health }] of creatures) {
-      if (cId === playerId) continue;
+    // 4. Отрисовка других существ
+    for (const creature of snapshot.creatures) {
+      const pos = worldToScreen(creature.x, creature.z);
 
-      const tag = world.getComponent(cId, 'tag');
-      const arch = tag?.archetype ?? meta.entityType;
-      if (arch !== 'creature') continue;
-
-      const pos = worldToScreen(transform.x, transform.z);
-
-      if (!health.isAlive) {
+      if (!creature.isAlive) {
         ctx.strokeStyle = '#7f8c8d';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
@@ -791,12 +712,7 @@ export const BlockMap: React.FC<BlockMapProps> = ({ isOpen, onClose, world, play
         continue;
       }
 
-      const ai = world.getComponent(cId, 'aiStats');
-      const isAttacker = ai?.behavior.current === 'AttackerTree';
-      const isDog =
-        meta.name.toLowerCase().includes('собака') || meta.name.toLowerCase().includes('dog');
-
-      ctx.fillStyle = isAttacker ? '#e74c3c' : isDog ? '#e67e22' : '#3498db';
+      ctx.fillStyle = creature.isAttacker ? '#e74c3c' : creature.isDog ? '#e67e22' : '#3498db';
       ctx.strokeStyle = '#111';
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -840,40 +756,36 @@ export const BlockMap: React.FC<BlockMapProps> = ({ isOpen, onClose, world, play
         ctx.restore();
       }
     }
-
     // 6. Отрисовка маркера игрока со стрелкой направления
-    if (playerId) {
-      const playerTrans = world.getComponent(playerId, 'transform');
-      if (playerTrans) {
-        const pPos = worldToScreen(playerTrans.x, playerTrans.z);
-        const angle = playerTrans.angle;
+    if (snapshot.playerPos) {
+      const pPos = worldToScreen(snapshot.playerPos.x, snapshot.playerPos.z);
+      const angle = snapshot.playerPos.angle;
 
-        ctx.save();
-        ctx.translate(pPos.x, pPos.y);
+      ctx.save();
+      ctx.translate(pPos.x, pPos.y);
 
-        ctx.fillStyle = 'rgba(46, 204, 113, 0.2)';
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.arc(0, 0, 24, angle - Math.PI / 6, angle + Math.PI / 6);
-        ctx.closePath();
-        ctx.fill();
+      ctx.fillStyle = 'rgba(46, 204, 113, 0.2)';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, 24, angle - Math.PI / 6, angle + Math.PI / 6);
+      ctx.closePath();
+      ctx.fill();
 
-        ctx.rotate(angle);
-        ctx.fillStyle = '#2ecc71';
-        ctx.strokeStyle = '#0e3a1f';
-        ctx.lineWidth = 1.5;
+      ctx.rotate(angle);
+      ctx.fillStyle = '#2ecc71';
+      ctx.strokeStyle = '#0e3a1f';
+      ctx.lineWidth = 1.5;
 
-        ctx.beginPath();
-        ctx.moveTo(7, 0);
-        ctx.lineTo(-5, -4.5);
-        ctx.lineTo(-2, 0);
-        ctx.lineTo(-5, 4.5);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(7, 0);
+      ctx.lineTo(-5, -4.5);
+      ctx.lineTo(-2, 0);
+      ctx.lineTo(-5, 4.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
 
-        ctx.restore();
-      }
+      ctx.restore();
     }
 
     // 7. Информационная плашка в углу карты
@@ -887,7 +799,7 @@ export const BlockMap: React.FC<BlockMapProps> = ({ isOpen, onClose, world, play
       8,
       h - 9
     );
-  }, [world, playerId, zoom, mapCenter, camera]);
+  }, [hudProvider, playerId, zoom, mapCenter, camera]);
 
   // Сброс кэша топографии при обновлении мира
   useEffect(() => {

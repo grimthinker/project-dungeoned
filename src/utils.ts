@@ -1,4 +1,4 @@
-import { Point, Vec3 } from './types';
+import { Point, TerrainHeightSampler, Vec3 } from './types';
 
 export type Radians = number;
 export type Degrees = number;
@@ -45,6 +45,73 @@ export function distance3D(
   const dy = end.y - start.y;
   const dz = end.z - start.z;
   return Math.hypot(dx, dy, dz);
+}
+
+/** Билинейная интерполяция высоты террейна в произвольной точке мира */
+export function getTerrainHeightAt(
+  terrain: TerrainHeightSampler,
+  worldX: number,
+  worldZ: number
+): number | null {
+  const halfW = terrain.width / 2;
+  const halfD = terrain.depth / 2;
+  if (worldX < -halfW || worldX > halfW || worldZ < -halfD || worldZ > halfD) {
+    return null;
+  }
+
+  const res = terrain.resolution;
+  const stepX = terrain.width / (res - 1);
+  const stepZ = terrain.depth / (res - 1);
+
+  const u = (worldX + halfW) / stepX;
+  const v = (worldZ + halfD) / stepZ;
+
+  const x0 = Math.floor(u);
+  const z0 = Math.floor(v);
+  const x1 = Math.min(res - 1, x0 + 1);
+  const z1 = Math.min(res - 1, z0 + 1);
+
+  const fx = u - x0;
+  const fz = v - z0;
+
+  const h00 = terrain.heights[z0 * res + x0] ?? 0;
+  const h10 = terrain.heights[z0 * res + x1] ?? 0;
+  const h01 = terrain.heights[z1 * res + x0] ?? 0;
+  const h11 = terrain.heights[z1 * res + x1] ?? 0;
+
+  const hTop = h00 * (1 - fx) + h10 * fx;
+  const hBottom = h01 * (1 - fx) + h11 * fx;
+
+  return hTop * (1 - fz) + hBottom * fz;
+}
+
+/** Вычисляет вектор нормали поверхности террейна в точке мира */
+export function getTerrainNormalAt(
+  terrain: TerrainData,
+  worldX: number,
+  worldZ: number
+): { x: number; y: number; z: number } {
+  const halfW = terrain.width / 2;
+  const halfD = terrain.depth / 2;
+  if (worldX < -halfW || worldX > halfW || worldZ < -halfD || worldZ > halfD) {
+    return { x: 0, y: 1, z: 0 };
+  }
+
+  const step = Math.max(0.1, terrain.width / (terrain.resolution - 1));
+  const hL = getTerrainHeightAt(terrain, worldX - step, worldZ) ?? 0;
+  const hR = getTerrainHeightAt(terrain, worldX + step, worldZ) ?? 0;
+  const hD = getTerrainHeightAt(terrain, worldX, worldZ - step) ?? 0;
+  const hU = getTerrainHeightAt(terrain, worldX, worldZ + step) ?? 0;
+
+  const dx = (hR - hL) / (2 * step);
+  const dz = (hU - hD) / (2 * step);
+
+  const len = Math.hypot(-dx, 1.0, -dz) || 1.0;
+  return {
+    x: -dx / len,
+    y: 1.0 / len,
+    z: -dz / len,
+  };
 }
 
 export function nowInSeconds(): number {

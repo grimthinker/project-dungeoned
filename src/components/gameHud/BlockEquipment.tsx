@@ -1,31 +1,19 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { World } from '../../ecs/World';
-import { GameApp } from '../../GameApp';
-import {
-  getAggregatedInteractionSlots,
-  getAnatomyParts,
-  AggregatedSlot,
-} from '../../ecs/utils/hierarchy';
-import { EquipmentArea } from '../../ecs/types';
 import { RETRO_PANEL_STYLE, RETRO_SUNKEN_STYLE } from './RetroStyles';
 import { HUD_CONFIG } from '../../config/hudConfig';
+import { IHudDataProvider } from './hudPorts';
 
 export interface BlockEquipmentProps {
-  app?: GameApp | null;
-  world: World | null | undefined;
+  hudProvider: IHudDataProvider;
   playerId: string | null;
 }
 
-export const BlockEquipment: React.FC<BlockEquipmentProps> = ({ app, world, playerId }) => {
-  // Индексы горизонтальной прокрутки рядов
+export const BlockEquipment: React.FC<BlockEquipmentProps> = ({ hudProvider, playerId }) => {
   const [slotScrollIndex, setSlotScrollIndex] = useState(0);
   const [equipScrollIndex, setEquipScrollIndex] = useState(0);
-
-  // Словарь индексов отображаемого предмета внутри каждой области экипировки: [areaKey]: itemIndex
   const [areaItemIndices, setAreaItemIndices] = useState<Record<string, number>>({});
 
-  // Контекстное меню слота предмета (Drop / Throw)
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -35,28 +23,9 @@ export const BlockEquipment: React.FC<BlockEquipmentProps> = ({ app, world, play
 
   const slotDomRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  // Сбор слотов взаимодействия
-  const slots: AggregatedSlot[] = useMemo(() => {
-    if (!world || !playerId) return [];
-    return getAggregatedInteractionSlots(world, playerId);
-  }, [world, playerId]);
-
-  // Сбор областей экипировки со всех частей тела существа
-  const equipAreas: Array<{ area: EquipmentArea; containerId: string }> = useMemo(() => {
-    if (!world || !playerId) return [];
-    const result: Array<{ area: EquipmentArea; containerId: string }> = [];
-    const parts = getAnatomyParts(world, playerId);
-
-    for (const pId of parts) {
-      const pEquip = world.getComponent(pId, 'equip');
-      if (pEquip && pEquip.equipmentAreas) {
-        for (const area of pEquip.equipmentAreas) {
-          result.push({ area, containerId: pId });
-        }
-      }
-    }
-    return result;
-  }, [world, playerId]);
+  const equipmentData = hudProvider.getPlayerEquipment(playerId);
+  const slots = equipmentData?.slots || [];
+  const equipAreas = equipmentData?.equipAreas || [];
 
   // Ровно 5 ячеек в ряду
   const VISIBLE_COUNT = 5;
@@ -89,28 +58,15 @@ export const BlockEquipment: React.FC<BlockEquipmentProps> = ({ app, world, play
   };
 
   const handleDrop = (globalSlotIndex: number) => {
-    if (app && playerId) {
-      const brain = app.world.getComponent(playerId, 'brain');
-      if (brain) {
-        app.updateEntityBlackboard(playerId, 'requestedDropSlot', globalSlotIndex);
-      } else {
-        app.world.addComponent(playerId, 'dropItemIntent', { slotIndex: globalSlotIndex });
-      }
+    if (playerId) {
+      hudProvider.dropItem(playerId, globalSlotIndex);
     }
     setContextMenu(null);
   };
 
   const handleThrow = (globalSlotIndex: number) => {
-    if (app && playerId) {
-      const aggSlots = getAggregatedInteractionSlots(app.world, playerId);
-      const slotInfo = aggSlots[globalSlotIndex];
-      if (slotInfo && slotInfo.slot.itemId) {
-        app.throwTargeting = {
-          slotIndex: globalSlotIndex,
-          partId: slotInfo.partId,
-          itemId: slotInfo.slot.itemId,
-        };
-      }
+    if (playerId) {
+      hudProvider.throwItem(playerId, globalSlotIndex);
     }
     setContextMenu(null);
   };
@@ -149,7 +105,7 @@ export const BlockEquipment: React.FC<BlockEquipmentProps> = ({ app, world, play
         const slotIdx = num - 1;
         if (slotIdx >= 0 && slotIdx < visibleSlots.length) {
           const info = visibleSlots[slotIdx];
-          const item = info.slot.itemId ? world?.getComponent(info.slot.itemId, 'item') : null;
+          const item = info.item;
           if (item) {
             e.preventDefault();
             if (contextMenu && contextMenu.globalSlotIndex === info.globalSlotIndex) {
@@ -177,7 +133,7 @@ export const BlockEquipment: React.FC<BlockEquipmentProps> = ({ app, world, play
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [contextMenu, visibleSlots, world, app, playerId]);
+  }, [contextMenu, visibleSlots, playerId, hudProvider]);
 
   const CELL_SIZE = 54;
 
@@ -240,13 +196,12 @@ export const BlockEquipment: React.FC<BlockEquipmentProps> = ({ app, world, play
       {/* 2. Ряд 1: Слоты взаимодействия (5 ячеек) */}
       <div style={{ display: 'flex', gap: '6px' }}>
         {visibleSlots.map((info, idx) => {
-          const slot = info.slot;
-          const item = slot.itemId ? world?.getComponent(slot.itemId, 'item') : null;
+          const item = info.item;
           const isBroken = info.isBroken;
 
           return (
             <div
-              key={`slot_${info.partId}_${slot.id}`}
+              key={`slot_${info.partId}_${info.globalSlotIndex}`}
               ref={(el) => {
                 slotDomRefs.current[idx] = el;
               }}
@@ -277,9 +232,8 @@ export const BlockEquipment: React.FC<BlockEquipmentProps> = ({ app, world, play
                 justifyContent: 'center',
                 cursor: 'pointer',
               }}
-              title={`${slot.name || 'Слот'} (${item ? item.name : 'Пусто'})`}
+              title={`${info.name || 'Слот'} (${item ? item.name : 'Пусто'})`}
             >
-              {/* Номер горячей клавиши [1..5] */}
               <span
                 style={{
                   position: 'absolute',
@@ -337,17 +291,16 @@ export const BlockEquipment: React.FC<BlockEquipmentProps> = ({ app, world, play
 
       {/* 3. Ряд 2: Области экипировки (5 ячеек с треугольными стрелками) */}
       <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
-        {visibleEquipAreas.map(({ area, containerId }, idx) => {
-          const areaKey = `${containerId}_${area.id}`;
+        {visibleEquipAreas.map((area) => {
+          const areaKey = `${area.containerId}_${area.areaId}`;
           const currentItemIdx = areaItemIndices[areaKey] ?? 0;
-          const activeItemId = area.itemIds[currentItemIdx] ?? null;
-          const item = activeItemId ? world?.getComponent(activeItemId, 'item') : null;
-          const hasMultipleItems = area.itemIds.length > 1;
+          const item = area.items[currentItemIdx] ?? null;
+          const hasMultipleItems = area.items.length > 1;
 
           return (
             <div
               key={areaKey}
-              onWheel={(e) => handleAreaWheel(areaKey, area.itemIds.length, e)}
+              onWheel={(e) => handleAreaWheel(areaKey, area.items.length, e)}
               style={{
                 display: 'flex',
                 flexDirection: 'column',
@@ -355,7 +308,6 @@ export const BlockEquipment: React.FC<BlockEquipmentProps> = ({ app, world, play
                 position: 'relative',
               }}
             >
-              {/* Верхняя треугольная стрелка */}
               <span
                 style={{
                   height: '6px',
@@ -368,7 +320,6 @@ export const BlockEquipment: React.FC<BlockEquipmentProps> = ({ app, world, play
                 ▲
               </span>
 
-              {/* Ячейка области экипировки */}
               <div
                 style={{
                   width: CELL_SIZE,
@@ -382,7 +333,7 @@ export const BlockEquipment: React.FC<BlockEquipmentProps> = ({ app, world, play
                   justifyContent: 'center',
                   position: 'relative',
                 }}
-                title={`${area.name}: ${item ? item.name : 'Пусто'} (${area.itemIds.length} предм.)`}
+                title={`${area.name}: ${item ? item.name : 'Пусто'} (${area.items.length} предм.)`}
               >
                 {item ? (
                   <span style={{ fontSize: '20px' }}>
@@ -413,7 +364,7 @@ export const BlockEquipment: React.FC<BlockEquipmentProps> = ({ app, world, play
                       fontFamily: 'inherit',
                     }}
                   >
-                    {currentItemIdx + 1}/{area.itemIds.length}
+                    {currentItemIdx + 1}/{area.items.length}
                   </span>
                 )}
               </div>

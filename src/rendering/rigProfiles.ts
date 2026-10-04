@@ -1,4 +1,4 @@
-import { BodyStructureType } from '../ecs/templates';
+import { BodyStructureType } from '../types';
 
 export interface RigProfile {
   rigAsset: string | null;

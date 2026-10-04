@@ -689,7 +689,7 @@ export const App: React.FC = () => {
           {engineState.mode === GameMode.GAME && (
             <GameHUD
               app={appRef.current}
-              world={appRef.current?.world}
+              hudProvider={appRef.current?.hudAdapter}
               selectedEntityId={selectedEntityId}
               onExitToEditor={goToEditor}
               onGotoSimulation={goToSimulation}

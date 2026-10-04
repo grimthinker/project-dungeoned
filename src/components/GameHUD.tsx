@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { World } from '../ecs/World';
 import { GameApp } from '../GameApp';
+import { IHudDataProvider } from './gameHud/hudPorts';
 
 import { BlockQuests } from './gameHud/BlockQuests';
 import { BlockEquipment } from './gameHud/BlockEquipment';
@@ -17,7 +17,7 @@ import { GAMEPLAY_CONFIG } from '../config/gameplayConfig';
 
 export interface GameHUDProps {
   app?: GameApp | null;
-  world: World | null | undefined;
+  hudProvider?: IHudDataProvider | null;
   selectedEntityId?: string | null;
   onExitToEditor: () => void;
   onGotoSimulation: () => void;
@@ -34,25 +34,22 @@ interface InfoWindowState {
 
 export const GameHUD: React.FC<GameHUDProps> = ({
   app,
-  world,
+  hudProvider = app?.hudAdapter,
   selectedEntityId,
   onExitToEditor,
   onGotoSimulation,
   onGotoMenu,
 }) => {
-  // Панели А, В открыты по умолчанию; большая карта [M] открывается по требованию
   const [isQuestsOpen, setIsQuestsOpen] = useState(true);
   const [isLogOpen, setIsLogOpen] = useState(true);
   const [isFullMapOpen, setIsFullMapOpen] = useState(false);
   const [isGameMenuOpen, setIsGameMenuOpen] = useState(false);
 
-  // Менеджер окон инфо осмотра
   const [infoWindows, setInfoWindows] = useState<InfoWindowState[]>([]);
   const maxZIndexRef = useRef<number>(100);
 
   const playerId = app ? app.getPlayerEntityId() : null;
 
-  // Открытие окна осмотра (максимум 5 окон, LRU вытеснение, z-index всплытие)
   const handleOpenInspect = (targetEntityId: string) => {
     maxZIndexRef.current += 1;
     const newZ = maxZIndexRef.current;
@@ -60,21 +57,19 @@ export const GameHUD: React.FC<GameHUDProps> = ({
     setInfoWindows((prev) => {
       const existingIdx = prev.findIndex((w) => w.entityId === targetEntityId);
       if (existingIdx !== -1) {
-        // Окно уже есть: всплывает наверх, сохраняя активную вкладку
         const updated = [...prev];
         updated[existingIdx] = { ...updated[existingIdx], zIndex: newZ };
         return updated;
       }
 
-      // Новое окно с каскадным сдвигом
       const cascadeCount = prev.length % GAMEPLAY_CONFIG.maxInfoWindows;
       const initialX =
         GAMEPLAY_CONFIG.infoWindowBasePos.x + cascadeCount * GAMEPLAY_CONFIG.infoWindowCascadeStep;
       const initialY =
         GAMEPLAY_CONFIG.infoWindowBasePos.y + cascadeCount * GAMEPLAY_CONFIG.infoWindowCascadeStep;
 
-      const tag = world?.getComponent(targetEntityId, 'tag');
-      const isCreature = tag?.archetype === 'creature';
+      const targetInfo = hudProvider?.getTargetPanelInfo(targetEntityId);
+      const isCreature = targetInfo?.isCreature ?? false;
 
       const newWindow: InfoWindowState = {
         entityId: targetEntityId,
@@ -84,7 +79,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         initialY,
       };
 
-      // LRU: если окон уже 5, закрываем самое старое (первое в массиве)
       if (prev.length >= GAMEPLAY_CONFIG.maxInfoWindows) {
         return [...prev.slice(1), newWindow];
       }
@@ -166,24 +160,24 @@ export const GameHUD: React.FC<GameHUDProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
   }, [isGameMenuOpen, app]);
 
-  if (!world) return null;
+  if (!hudProvider) return null;
 
   return (
     <>
       {/* Блок Е: Параметры игрока + кукла анатомии (верхний левый угол) */}
-      <BlockStatus world={world} playerId={playerId} />
+      <BlockStatus hudProvider={hudProvider} playerId={playerId} />
 
       {/* Блок Ж: Компас направлений сторон света (верхний центр) */}
       <BlockCompass camera={app?.camera} />
 
       {/* Постоянная фиксированная миникарта (верхний правый угол, 30..60м) */}
-      <BlockMinimap world={world} playerId={playerId} camera={app?.camera} />
+      <BlockMinimap hudProvider={hudProvider} playerId={playerId} camera={app?.camera} />
 
       {/* Полноценная интерактивная карта (открывается по клавише [M]) */}
       <BlockMap
         isOpen={isFullMapOpen}
         onClose={() => setIsFullMapOpen(false)}
-        world={world}
+        hudProvider={hudProvider}
         playerId={playerId}
         camera={app?.camera}
       />
@@ -192,13 +186,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       <BlockQuests isOpen={isQuestsOpen} onClose={() => setIsQuestsOpen(false)} />
 
       {/* Блок Б: Слоты взаимодействия и области экипировки (центр снизу) */}
-      <BlockEquipment app={app} world={world} playerId={playerId} />
+      <BlockEquipment hudProvider={hudProvider} playerId={playerId} />
 
       {/* Блок З: Панель цели справа (ракурс игрока, зум и кнопки действий) */}
       {selectedEntityId && selectedEntityId !== playerId && (
         <BlockTargetPanel
           app={app}
-          world={world}
+          hudProvider={hudProvider}
           targetId={selectedEntityId}
           onOpenInspect={handleOpenInspect}
         />
@@ -208,7 +202,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       {infoWindows.map((win) => (
         <EntityInfoWindow
           key={win.entityId}
-          world={world}
+          hudProvider={hudProvider}
           targetId={win.entityId}
           isCurrentlySelected={selectedEntityId === win.entityId}
           activeTab={win.activeTab}

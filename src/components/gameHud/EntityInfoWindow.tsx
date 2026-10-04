@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { World } from '../../ecs/World';
+import React from 'react';
 import { RetroWindow } from './RetroWindow';
 import { RETRO_SUNKEN_STYLE, RETRO_BUTTON_STYLE, RETRO_BUTTON_PRESSED_STYLE } from './RetroStyles';
 import { InfoTabStatus } from './InfoTabStatus';
 import { InfoTabEquipment } from './InfoTabEquipment';
 import { InfoTabParameters } from './InfoTabParameters';
 import { t } from '../../locales';
+import { IHudDataProvider } from './hudPorts';
 
 export interface EntityInfoWindowProps {
-  world: World;
+  hudProvider: IHudDataProvider;
   targetId: string;
   isCurrentlySelected: boolean;
   activeTab: string;
@@ -21,7 +21,7 @@ export interface EntityInfoWindowProps {
 }
 
 export const EntityInfoWindow: React.FC<EntityInfoWindowProps> = ({
-  world,
+  hudProvider,
   targetId,
   isCurrentlySelected,
   activeTab,
@@ -32,12 +32,9 @@ export const EntityInfoWindow: React.FC<EntityInfoWindowProps> = ({
   initialY,
   zIndex,
 }) => {
-  const tag = world.getComponent(targetId, 'tag');
-  const meta = world.getComponent(targetId, 'meta');
-  const item = world.getComponent(targetId, 'item');
-  const isCreature = tag?.archetype === 'creature';
-
-  const rawName = meta?.name ?? item?.name ?? targetId;
+  const targetInfo = hudProvider.getTargetPanelInfo(targetId);
+  const isCreature = targetInfo?.isCreature ?? false;
+  const rawName = targetInfo?.name ?? targetId;
   const title = `ИНФО: ${rawName}`;
 
   // Доступные вкладки в зависимости от типа
@@ -131,21 +128,21 @@ export const EntityInfoWindow: React.FC<EntityInfoWindowProps> = ({
           >
             {currentTab === 'status' && (
               <InfoTabStatus
-                world={world}
+                hudProvider={hudProvider}
                 targetId={targetId}
                 isCurrentlySelected={isCurrentlySelected}
               />
             )}
             {currentTab === 'equipment' && (
               <InfoTabEquipment
-                world={world}
+                hudProvider={hudProvider}
                 targetId={targetId}
                 isCurrentlySelected={isCurrentlySelected}
               />
             )}
             {currentTab === 'parameters' && (
               <InfoTabParameters
-                world={world}
+                hudProvider={hudProvider}
                 targetId={targetId}
                 isCurrentlySelected={isCurrentlySelected}
               />

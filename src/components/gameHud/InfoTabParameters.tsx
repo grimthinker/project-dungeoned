@@ -1,77 +1,23 @@
-import React from 'react';
-import { World } from '../../ecs/World';
-import { t } from '../../locales';
-
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GAMEPLAY_CONFIG } from '../../config/gameplayConfig';
+import { IHudDataProvider } from './hudPorts';
 
 export interface InfoTabParametersProps {
-  world: World;
+  hudProvider: IHudDataProvider;
   targetId: string;
   isCurrentlySelected: boolean;
 }
 
 export const InfoTabParameters: React.FC<InfoTabParametersProps> = ({
-  world,
+  hudProvider,
   targetId,
   isCurrentlySelected,
 }) => {
-  const captureSnapshot = () => {
-    const physStats = world.getComponent(targetId, 'physicsStats');
-    const meta = world.getComponent(targetId, 'meta');
-    const velocity = world.getComponent(targetId, 'velocity');
-    const stealthStats = world.getComponent(targetId, 'stealthStats');
-    const tag = world.getComponent(targetId, 'tag');
-    const isCreature = tag?.archetype === 'creature' || !!meta?.stance;
-
-    const radius = physStats ? physStats.radius.current.toFixed(2) : '—';
-    const height = physStats?.height ? physStats.height.current.toFixed(2) : '—';
-    const weight = physStats ? (physStats.totalWeight ?? physStats.weight.current).toFixed(1) : '—';
-
-    const paramRows: Array<{ label: string; value: string }> = [
-      {
-        label: t('interaction.params.radius'),
-        value: `${radius} ${t('interaction.params.meterUnit')}`,
-      },
-      {
-        label: t('interaction.params.height'),
-        value: `${height} ${t('interaction.params.meterUnit')}`,
-      },
-      {
-        label: t('interaction.params.weight'),
-        value: `${weight} ${t('interaction.params.kgUnit')}`,
-      },
-    ];
-
-    if (isCreature) {
-      const stance = meta?.stance || 'standing';
-      const movementMode = meta?.movementMode || 'immobile';
-      const actionMode = meta?.actionMode || 'idle';
-      const speed = velocity
-        ? (velocity.actualSpeed ?? velocity.currentSpeed ?? 0).toFixed(2)
-        : '0.00';
-      const stealth = stealthStats ? Math.round(stealthStats.stealthPower.current).toString() : '—';
-
-      paramRows.push(
-        { label: t('interaction.params.stance'), value: stance },
-        { label: t('interaction.params.movementMode'), value: movementMode },
-        { label: t('interaction.params.actionMode'), value: actionMode },
-        {
-          label: t('interaction.params.speed'),
-          value: `${speed} ${t('interaction.params.speedUnit')}`,
-        },
-        { label: t('interaction.params.stealth'), value: stealth }
-      );
-    }
-
-    return paramRows;
-  };
-
+  const captureSnapshot = () => hudProvider.getInspectParameters(targetId);
   const [rows, setRows] = useState(captureSnapshot);
 
   useEffect(() => {
     if (!isCurrentlySelected) return;
-
     setRows(captureSnapshot());
 
     const interval = setInterval(() => {
@@ -79,7 +25,7 @@ export const InfoTabParameters: React.FC<InfoTabParametersProps> = ({
     }, GAMEPLAY_CONFIG.infoWindowUpdateInterval * 1000);
 
     return () => clearInterval(interval);
-  }, [isCurrentlySelected, targetId, world]);
+  }, [isCurrentlySelected, targetId, hudProvider]);
 
   return (
     <div

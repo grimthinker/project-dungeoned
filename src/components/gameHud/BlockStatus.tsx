@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
-import { World } from '../../ecs/World';
-import { getAnatomyParts } from '../../ecs/utils/hierarchy';
 import { RETRO_PANEL_STYLE, RETRO_SUNKEN_STYLE } from './RetroStyles';
 import { HUD_CONFIG } from '../../config/hudConfig';
 import { StatusBars } from './StatusBars';
+import { IHudDataProvider } from './hudPorts';
 
 export interface BlockStatusProps {
-  world: World | null | undefined;
+  hudProvider: IHudDataProvider;
   playerId: string | null;
 }
 
@@ -46,65 +45,65 @@ function getFpColor(currentFp: number, maxFp: number): string {
   }
 }
 
-export const BlockStatus: React.FC<BlockStatusProps> = ({ world, playerId }) => {
-  const [bars, setBars] = useState<Array<StatBarDef & { icon: string; title: string }>>([
-    {
-      id: 'red',
-      icon: '🩸',
-      title: 'Запас крови',
-      label: 'Запас крови',
-      color: HUD_CONFIG.status.bars.health,
-      current: 75,
-      max: 100,
-    },
-    {
-      id: 'green',
-      icon: '💪',
-      title: 'Запас сил',
-      label: 'Запас сил',
-      color: HUD_CONFIG.status.bars.stamina,
-      current: 90,
-      max: 100,
-    },
-    {
-      id: 'purple',
-      icon: '👁️',
-      title: 'Концентрация',
-      label: 'Концентрация',
-      color: HUD_CONFIG.status.bars.energy,
-      current: 50,
-      max: 100,
-    },
-    {
-      id: 'cyan',
-      icon: '🔷',
-      title: 'Запас энергии',
-      label: 'Запас энергии',
-      color: HUD_CONFIG.status.bars.resilience,
-      current: 65,
-      max: 100,
-    },
-    {
-      id: 'orange',
-      icon: '⚖️',
-      title: 'Баланс',
-      label: 'Баланс',
-      color: HUD_CONFIG.status.bars.balance,
-      current: 40,
-      max: 100,
-    },
-  ]);
-
-  const [hoveredBarId, setHoveredBarId] = useState<string | null>(null);
+export const BlockStatus: React.FC<BlockStatusProps> = ({ hudProvider, playerId }) => {
   const [hoveredPartKey, setHoveredPartKey] = useState<string | null>(null);
 
-  const playerName =
-    (playerId && world ? world.getComponent(playerId, 'meta')?.name : null) || 'Игрок';
+  const statusData = hudProvider.getPlayerStatus(playerId);
 
-  const animator = playerId && world ? world.getComponent(playerId, 'animator') : null;
-  const isHumanoid = animator?.rigType === 'humanoid';
+  const [bars, setBars] = useState(
+    () =>
+      statusData?.bars || [
+        {
+          id: 'red',
+          icon: '🩸',
+          title: 'Запас крови',
+          label: 'Запас крови',
+          color: HUD_CONFIG.status.bars.health,
+          current: 75,
+          max: 100,
+        },
+        {
+          id: 'green',
+          icon: '💪',
+          title: 'Запас сил',
+          label: 'Запас сил',
+          color: HUD_CONFIG.status.bars.stamina,
+          current: 90,
+          max: 100,
+        },
+        {
+          id: 'purple',
+          icon: '👁️',
+          title: 'Концентрация',
+          label: 'Концентрация',
+          color: HUD_CONFIG.status.bars.energy,
+          current: 50,
+          max: 100,
+        },
+        {
+          id: 'cyan',
+          icon: '🔷',
+          title: 'Запас энергии',
+          label: 'Запас энергии',
+          color: HUD_CONFIG.status.bars.resilience,
+          current: 65,
+          max: 100,
+        },
+        {
+          id: 'orange',
+          icon: '⚖️',
+          title: 'Баланс',
+          label: 'Баланс',
+          color: HUD_CONFIG.status.bars.balance,
+          current: 40,
+          max: 100,
+        },
+      ]
+  );
 
-  const partColors: Record<string, string> = {
+  const playerName = statusData?.name || 'Игрок';
+  const isHumanoid = statusData?.isHumanoid ?? true;
+  const partColors = statusData?.partColors || {
     head: HUD_CONFIG.status.paperDoll.fpIntact,
     torso: HUD_CONFIG.status.paperDoll.fpIntact,
     arm_l: HUD_CONFIG.status.paperDoll.fpIntact,
@@ -112,8 +111,7 @@ export const BlockStatus: React.FC<BlockStatusProps> = ({ world, playerId }) => 
     leg_l: HUD_CONFIG.status.paperDoll.fpIntact,
     leg_r: HUD_CONFIG.status.paperDoll.fpIntact,
   };
-
-  const partFp: Record<string, PartFpInfo> = {
+  const partFp = statusData?.partFp || {
     head: { name: 'Голова', percent: 100 },
     torso: { name: 'Туловище', percent: 100 },
     arm_l: { name: 'Левая рука', percent: 100 },
@@ -121,44 +119,6 @@ export const BlockStatus: React.FC<BlockStatusProps> = ({ world, playerId }) => 
     leg_l: { name: 'Левая нога', percent: 100 },
     leg_r: { name: 'Правая нога', percent: 100 },
   };
-
-  if (isHumanoid && world && playerId) {
-    const parts = getAnatomyParts(world, playerId);
-    for (const pId of parts) {
-      const tag = world.getComponent(pId, 'tag');
-      const fp = world.getComponent(pId, 'functionalHealth');
-      const meta = world.getComponent(pId, 'meta');
-      const color = fp
-        ? getFpColor(fp.current, fp.max.current)
-        : HUD_CONFIG.status.paperDoll.fpIntact;
-      const percent =
-        fp && fp.max.current > 0 ? Math.round((fp.current / fp.max.current) * 100) : 100;
-
-      if (tag?.subType === 'head' || pId.includes('head')) {
-        partColors.head = color;
-        partFp.head = { name: meta?.name || 'Голова', percent };
-      } else if (tag?.subType === 'torso' || pId.includes('torso')) {
-        partColors.torso = color;
-        partFp.torso = { name: meta?.name || 'Туловище', percent };
-      } else if (tag?.subType === 'arm' || pId.includes('arm')) {
-        if (pId.includes('arm_l') || pId.includes('left')) {
-          partColors.arm_l = color;
-          partFp.arm_l = { name: meta?.name || 'Левая рука', percent };
-        } else {
-          partColors.arm_r = color;
-          partFp.arm_r = { name: meta?.name || 'Правая рука', percent };
-        }
-      } else if (tag?.subType === 'leg' || pId.includes('leg')) {
-        if (pId.includes('leg_l') || pId.includes('left')) {
-          partColors.leg_l = color;
-          partFp.leg_l = { name: meta?.name || 'Левая нога', percent };
-        } else {
-          partColors.leg_r = color;
-          partFp.leg_r = { name: meta?.name || 'Правая нога', percent };
-        }
-      }
-    }
-  }
 
   const handleSpendBar = (barId: string) => {
     setBars((prev) =>

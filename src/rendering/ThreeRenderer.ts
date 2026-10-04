@@ -18,7 +18,6 @@ import { IModelPreview } from './IModelPreview';
 import { ThreeModelPreview } from './ThreeModelPreview';
 import { TERRAIN_CONFIG } from '../config/terrainConfig';
 import { GRAPHICS_CONFIG } from '../config/graphicsConfig';
-import { EntityId } from '../ecs/types';
 
 const DASH_THROW_TRAJECTORY = [5, 5];
 const DASH_EMPTY: number[] = [];
@@ -286,7 +285,7 @@ export class ThreeRenderer implements IRenderer {
     return new ThreeModelPreview();
   }
 
-  public pickEntity(clientX: number, clientY: number): EntityId | null {
+  public pickEntity(clientX: number, clientY: number): string | null {
     const rect = this.canvas.getBoundingClientRect();
     this.mouseNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     this.mouseNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;

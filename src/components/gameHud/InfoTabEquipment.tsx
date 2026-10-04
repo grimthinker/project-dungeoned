@@ -1,60 +1,25 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { World } from '../../ecs/World';
-import { getAggregatedInteractionSlots, getAnatomyParts } from '../../ecs/utils/hierarchy';
-import { EquipmentArea } from '../../ecs/types';
+import React, { useEffect, useState } from 'react';
 import { RETRO_SUNKEN_STYLE } from './RetroStyles';
 import { HUD_CONFIG } from '../../config/hudConfig';
-
 import { GAMEPLAY_CONFIG } from '../../config/gameplayConfig';
+import { IHudDataProvider } from './hudPorts';
 
 export interface InfoTabEquipmentProps {
-  world: World;
+  hudProvider: IHudDataProvider;
   targetId: string;
   isCurrentlySelected: boolean;
 }
 
 export const InfoTabEquipment: React.FC<InfoTabEquipmentProps> = ({
-  world,
+  hudProvider,
   targetId,
   isCurrentlySelected,
 }) => {
-  const captureSnapshot = () => {
-    const liveSlots = getAggregatedInteractionSlots(world, targetId);
-    const slotsData = liveSlots.map((info) => {
-      const item = info.slot.itemId ? world.getComponent(info.slot.itemId, 'item') : null;
-      return {
-        id: info.slot.id,
-        name: info.slot.name,
-        isBroken: info.isBroken,
-        item: item ? { ...item } : null,
-      };
-    });
-
-    const areasData: Array<{ area: EquipmentArea; containerId: string; item: any }> = [];
-    const parts = getAnatomyParts(world, targetId);
-    for (const pId of parts) {
-      const pEquip = world.getComponent(pId, 'equip');
-      if (pEquip && pEquip.equipmentAreas) {
-        for (const area of pEquip.equipmentAreas) {
-          const activeItemId = area.itemIds[0] ?? null;
-          const item = activeItemId ? world.getComponent(activeItemId, 'item') : null;
-          areasData.push({
-            area: { ...area },
-            containerId: pId,
-            item: item ? { ...item } : null,
-          });
-        }
-      }
-    }
-
-    return { slotsData, areasData };
-  };
-
+  const captureSnapshot = () => hudProvider.getInspectEquipment(targetId);
   const [snapshot, setSnapshot] = useState(captureSnapshot);
 
   useEffect(() => {
     if (!isCurrentlySelected) return;
-
     setSnapshot(captureSnapshot());
 
     const interval = setInterval(() => {
@@ -62,7 +27,7 @@ export const InfoTabEquipment: React.FC<InfoTabEquipmentProps> = ({
     }, GAMEPLAY_CONFIG.infoWindowUpdateInterval * 1000);
 
     return () => clearInterval(interval);
-  }, [isCurrentlySelected, targetId, world]);
+  }, [isCurrentlySelected, targetId, hudProvider]);
 
   const { slotsData, areasData } = snapshot;
 
@@ -118,14 +83,14 @@ export const InfoTabEquipment: React.FC<InfoTabEquipmentProps> = ({
       <div>
         <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '2px' }}>
           {areasData.length > 0 ? (
-            areasData.map(({ area, containerId, item }, idx) => (
+            areasData.map((area, idx) => (
               <div
-                key={`info_area_${containerId}_${area.id}_${idx}`}
+                key={`info_area_${area.containerId}_${area.areaId}_${idx}`}
                 style={{
                   width: CELL_SIZE,
                   height: CELL_SIZE,
                   ...RETRO_SUNKEN_STYLE,
-                  backgroundColor: item
+                  backgroundColor: area.item
                     ? HUD_CONFIG.equipment.slotFilled
                     : HUD_CONFIG.equipment.slotEmpty,
                   display: 'flex',
@@ -134,19 +99,23 @@ export const InfoTabEquipment: React.FC<InfoTabEquipmentProps> = ({
                   position: 'relative',
                   flexShrink: 0,
                 }}
-                title={`${area.name}: ${item ? item.name : 'Пусто'} (${area.itemIds.length} предм.)`}
+                title={`${area.name}: ${area.item ? area.item.name : 'Пусто'} (${area.itemIdsCount} предм.)`}
               >
-                {item ? (
+                {area.item ? (
                   <span style={{ fontSize: '18px' }}>
-                    {item.icon ||
-                      (item.type === 'armor' ? '🦺' : item.type === 'weapon' ? '🗡️' : '📦')}
+                    {area.item.icon ||
+                      (area.item.type === 'armor'
+                        ? '🦺'
+                        : area.item.type === 'weapon'
+                          ? '🗡️'
+                          : '📦')}
                   </span>
                 ) : (
                   <span style={{ fontSize: '10px', color: '#777', fontWeight: 'bold' }}>
                     {area.name.substring(0, 3)}
                   </span>
                 )}
-                {area.itemIds.length > 1 && (
+                {area.itemIdsCount > 1 && (
                   <span
                     style={{
                       position: 'absolute',
@@ -157,7 +126,7 @@ export const InfoTabEquipment: React.FC<InfoTabEquipmentProps> = ({
                       color: HUD_CONFIG.equipment.counterText,
                     }}
                   >
-                    {area.itemIds.length}
+                    {area.itemIdsCount}
                   </span>
                 )}
               </div>
