@@ -1,30 +1,30 @@
-import type { GameApp } from '../GameApp';
+import type { IEntityClonerContext } from '../core/contexts';
 import { EDITOR_CONFIG } from '../config/editorConfig';
 import { TransactionBuilder } from '../history/TransactionBuilder';
 import { getAnatomyParts, getAllContainedItems, getRootOwner } from '../ecs/utils/hierarchy';
 import { SerializedEntityData } from '../ecs/WorldSerializer';
 
 export class EntityClonerService {
-  constructor(private app: GameApp) {}
+  constructor(private ctx: IEntityClonerContext) {}
 
   public duplicateEntities(
     ids: string[],
     offset: { x: number; z: number; y?: number } = EDITOR_CONFIG.cloneOffset
   ): string[] {
-    const validIds = ids.filter((id) => this.app.world.getEntity(id));
+    const validIds = ids.filter((id) => this.ctx.world.getEntity(id));
     if (validIds.length === 0) return [];
 
-    const tx = new TransactionBuilder(this.app, 'Клонирование объектов');
+    const tx = new TransactionBuilder(this.ctx, 'Клонирование объектов');
     tx.captureBefore([]);
 
     // Оставляем только верхнеуровневые корни для клонирования, исключая вложенные части и экипированные предметы
     const rootIdsToClone = validIds.filter((id) => {
-      const tag = this.app.world.getComponent(id, 'tag');
+      const tag = this.ctx.world.getComponent(id, 'tag');
       if (tag?.archetype === 'bodyPart') {
-        const root = getRootOwner(this.app.world, id);
+        const root = getRootOwner(this.ctx.world, id);
         if (root && validIds.includes(root)) return false;
       }
-      const ownership = this.app.world.getComponent(id, 'ownership');
+      const ownership = this.ctx.world.getComponent(id, 'ownership');
       if (ownership && validIds.includes(ownership.ownerId)) return false;
       return true;
     });
@@ -35,9 +35,9 @@ export class EntityClonerService {
     const allClusterIds = new Set<string>();
     for (const rootId of rootIdsToClone) {
       allClusterIds.add(rootId);
-      const parts = getAnatomyParts(this.app.world, rootId).filter((p) => p !== rootId);
+      const parts = getAnatomyParts(this.ctx.world, rootId).filter((p) => p !== rootId);
       for (const p of parts) allClusterIds.add(p);
-      const items = getAllContainedItems(this.app.world, rootId);
+      const items = getAllContainedItems(this.ctx.world, rootId);
       for (const it of items) allClusterIds.add(it);
     }
 
@@ -45,11 +45,11 @@ export class EntityClonerService {
     const idMap = new Map<string, string>();
     for (const oldId of allClusterIds) {
       const prefix = oldId.split('_').slice(0, 2).join('_') || 'ent';
-      idMap.set(oldId, this.app.entityFactory.generateId(prefix));
+      idMap.set(oldId, this.ctx.generateEntityId(prefix));
     }
 
     // 3. Сериализуем структуры данных через существующий WorldSerializer (DRY)
-    const serializedEntities: SerializedEntityData[] = this.app.serializer.serializeEntities(
+    const serializedEntities: SerializedEntityData[] = this.ctx.serializeEntities(
       Array.from(allClusterIds)
     );
 
@@ -164,19 +164,19 @@ export class EntityClonerService {
     }
 
     // 5. Десериализуем клонированные сущности через WorldSerializer (создание физики, нормализация статов, биндинг мозга)
-    this.app.serializer.deserializeEntities(serializedEntities);
+    this.ctx.deserializeEntities(serializedEntities);
 
     const newRootIds = rootIdsToClone.map((oldId) => idMap.get(oldId)!);
 
     // 6. Выделяем созданные объекты и фиксируем транзакцию истории
     if (newRootIds.length > 0) {
-      this.app.selection.selectEntities(newRootIds);
+      this.ctx.selection.selectEntities(newRootIds);
     }
 
-    this.app.syncPhysicsStructures();
+    this.ctx.syncPhysicsStructures();
     tx.includeAdded(newRootIds);
     tx.commit();
-    this.app.captureBaseState();
+    this.ctx.captureBaseState();
 
     return newRootIds;
   }

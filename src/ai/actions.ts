@@ -67,6 +67,7 @@ export class BTActionPursue extends BTAction {
     stopDist: LOGIC_CONFIG.followStopDist,
     sprintMinDistance: undefined as number | undefined,
     walkDistance: undefined as number | undefined,
+    forceGait: undefined as MovementGait | undefined,
     hysteresis: 1.0,
     lookAtTarget: true,
   };
@@ -91,10 +92,13 @@ export class BTActionPursue extends BTAction {
   }
 
   protected onOpen(_entity: IAIAgent): void {
-    this.currentGait = 'jog';
+    this.currentGait = this.params.forceGait ?? 'jog';
   }
 
   private updateGait(dist: number): MovementGait {
+    if (this.params.forceGait) {
+      return this.params.forceGait;
+    }
     const sprintMin = this.params.sprintMinDistance;
     const walkDist = this.params.walkDistance;
     const h = this.params.hysteresis ?? 1.0;
@@ -159,7 +163,9 @@ export class BTActionPursue extends BTAction {
     const dist = Math.hypot(dx, dz);
 
     const hasCustomGait =
-      this.params.sprintMinDistance !== undefined || this.params.walkDistance !== undefined;
+      this.params.forceGait !== undefined ||
+      this.params.sprintMinDistance !== undefined ||
+      this.params.walkDistance !== undefined;
 
     let run = false;
     let slowWalk = false;
@@ -687,7 +693,12 @@ export const BTConditionFetchState = BTConditionStringState;
 export class BTActionMoveToPos extends BTAction {
   public static readonly nodeName = 'Двигаться к позиции';
   public static readonly description = 'Движется к координатам Vec3 из блекборда';
-  public static readonly defaultParams = { posKey: 'playZoneCenter', stopDist: 2.0, sprint: false };
+  public static readonly defaultParams = {
+    posKey: 'playZoneCenter',
+    stopDist: 2.0,
+    sprint: false,
+    walk: false,
+  };
 
   private params: typeof BTActionMoveToPos.defaultParams;
 
@@ -712,7 +723,11 @@ export class BTActionMoveToPos extends BTAction {
     }
 
     if (entity.isAlive) {
-      entity.setMoveTarget(dx / dist, dz / dist, this.params.sprint, false);
+      const run = this.params.sprint;
+      const slowWalk = this.params.walk;
+      bb.set('gaitRun', run);
+      bb.set('gaitWalk', slowWalk);
+      entity.setMoveTarget(dx / dist, dz / dist, run, slowWalk);
       entity.setLookTarget(Math.atan2(dz, dx) as Radians);
     }
 

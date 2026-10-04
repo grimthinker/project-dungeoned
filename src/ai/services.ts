@@ -469,7 +469,8 @@ export class BTServiceEnforceWalkMode extends BTService {
   }
 
   protected tickService(entity: IAIAgent): void {
-    // Делегируется в адаптер
+    entity.blackboard.set('gaitRun', false);
+    entity.blackboard.set('gaitWalk', true);
   }
 }
 

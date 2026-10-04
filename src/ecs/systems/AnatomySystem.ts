@@ -17,21 +17,18 @@ import { ARCHETYPE_ASSEMBLERS } from '../archetypes';
 import { setBaseStat, createStat } from '../stats/StatEvaluator';
 import { evaluateConsciousness, getLocomotionState, getSensoryStats } from '../utils/anatomyStatus';
 import { ConsciousnessState } from '../types';
-import { CREATURE_RIG_PROFILES } from '../../rendering/rigProfiles';
-import { BodyStructureType } from '../templates';
+import { CREATURE_BLUEPRINTS, BodyStructureType } from '../templates';
 import { invalidateAnatomyCache } from '../utils/hierarchy';
 
 export class AnatomySystem {
   public update(_dt: number, world: World, physics: PhysicsSystem): void {
-    // 0. Удаление частей тела, у которых структурная прочность (СП) упала до 0
     const destructibleParts = world.getEntitiesWith('socketDef', 'health');
     for (const [partId, { health }] of destructibleParts) {
       if (health.current <= 0) {
-        destroyPartRecursive(world, physics, partId);
+        destroyPartRecursive(world, partId);
       }
     }
 
-    // 1. Поиск всех изолированных подграфов соединенных частей тела
     const bodyParts = world.getEntitiesWith('socketDef');
     const visitedParts = new Set<EntityId>();
     const subgraphs: EntityId[][] = [];
@@ -43,7 +40,6 @@ export class AnatomySystem {
       subgraphs.push(graph);
     }
 
-    // 2. Сбор существующих корней существ для разрешения преемственности
     const existingCreatureRoots = world.getEntitiesWith('assemblyRoot').filter(([id]) => {
       const tag = world.getComponent(id, 'tag');
       return tag?.archetype === 'creature';
@@ -74,7 +70,6 @@ export class AnatomySystem {
     const viablePlans: ViableCreaturePlan[] = [];
     const itemPlans: NonViableItemPlan[] = [];
 
-    // 3. Арбитраж подграфов: сопоставление с существующими корнями
     for (const graph of subgraphs) {
       const brainId = findActiveBrain(world, graph[0]);
       const heartId = graph.find((id) => world.getComponent(id, 'heart') !== undefined);
@@ -205,8 +200,8 @@ export class AnatomySystem {
     for (const [rootId] of existingCreatureRoots) {
       if (!claimedCreatureRootIds.has(rootId)) {
         const phys = world.getComponent(rootId, 'physicsBody');
-        if (phys?.rawBody) {
-          physics.driver?.removeRigidBody(phys.rawBody);
+        if (phys?.bodyHandle !== undefined) {
+          physics.driver?.removeRigidBody(phys.bodyHandle);
         }
         world.removeEntity(rootId);
       }
@@ -311,19 +306,17 @@ export class AnatomySystem {
       });
       rootPhysStats = world.getComponent(rootId, 'physicsStats')!;
     } else {
-      // Обновляем только суммарный вес анатомической системы,
-      // НЕ затирая мастер-радиус и рост существа из чертежа/инспектора
       setBaseStat(rootPhysStats.weight, plan.totalWeight);
     }
 
     let rootPhysBody = world.getComponent(rootId, 'physicsBody');
     const rootTransform = world.getComponent(rootId, 'transform') ?? anchorTransform;
 
-    let rawBody = rootPhysBody?.rawBody;
-    let rawCollider = rootPhysBody?.rawCollider;
+    let bodyHandle = rootPhysBody?.bodyHandle;
+    let colliderHandle = rootPhysBody?.colliderHandle;
 
-    if (!rawBody && physics.driver && physics.driver.isReady) {
-      rawBody = physics.driver.createKinematicPositionBody(
+    if (bodyHandle === undefined && physics.driver && physics.driver.isReady) {
+      bodyHandle = physics.driver.createKinematicPositionBody(
         { x: rootTransform.x, y: rootTransform.y, z: rootTransform.z },
         rootId
       );
@@ -331,13 +324,10 @@ export class AnatomySystem {
       const height = rootPhysStats.height.current;
       const halfHeight = Math.max(0.01, (height - 2 * radius) / 2);
       const offsetY = halfHeight + radius;
-      rawCollider = physics.driver.createCapsuleCollider(
-        halfHeight,
-        radius,
-        rawBody,
-        plan.totalWeight,
-        offsetY
-      );
+      colliderHandle = physics.driver.createCapsuleCollider(halfHeight, radius, bodyHandle, {
+        mass: plan.totalWeight,
+        offset: { x: 0, y: offsetY, z: 0 },
+      });
     }
 
     const radius = rootPhysStats.radius.current;
@@ -345,8 +335,8 @@ export class AnatomySystem {
 
     if (!rootPhysBody) {
       world.addComponent(rootId, 'physicsBody', {
-        rawBody,
-        rawCollider,
+        bodyHandle,
+        colliderHandle,
         bodyType: 'kinematicPositionBased',
         isStatic: false,
         category: CollisionCategory.CREATURE,
@@ -356,8 +346,8 @@ export class AnatomySystem {
         lastAppliedHeight: height,
       });
     } else {
-      rootPhysBody.rawBody = rawBody;
-      rootPhysBody.rawCollider = rawCollider;
+      rootPhysBody.bodyHandle = bodyHandle;
+      rootPhysBody.colliderHandle = colliderHandle;
       rootPhysBody.bodyType = 'kinematicPositionBased';
       rootPhysBody.currentColliderStance = 'standing';
       rootPhysBody.lastAppliedRadius = radius;
@@ -382,7 +372,7 @@ export class AnatomySystem {
       }
       const physBody = world.getComponent(partId, 'physicsBody');
       if (physBody) {
-        if (physBody.rawBody) physics.driver?.removeRigidBody(physBody.rawBody);
+        if (physBody.bodyHandle !== undefined) physics.driver?.removeRigidBody(physBody.bodyHandle);
         world.removeComponent(partId, 'physicsBody');
       }
       world.removeComponent(partId, 'item');
@@ -460,8 +450,8 @@ export class AnatomySystem {
 
     const anchorVisual = world.getComponent(anchorPartId, 'visualModel');
     const rigStructure = (plan.rigType as BodyStructureType) || 'humanoid';
-    const rigProfile = CREATURE_RIG_PROFILES[rigStructure] || CREATURE_RIG_PROFILES.humanoid;
-    const rigAsset = rigProfile?.rigAsset ?? '3d/creatures/humanoid/rig.glb';
+    const blueprint = CREATURE_BLUEPRINTS[rigStructure] || CREATURE_BLUEPRINTS.humanoid;
+    const rigAsset = blueprint?.rigAsset ?? 'proc://rig/humanoid';
 
     world.addComponent(rootItemId, 'visualModel', {
       modelId: plan.graph.length === 1 && anchorVisual?.modelId ? anchorVisual.modelId : rigAsset,
@@ -525,7 +515,7 @@ export class AnatomySystem {
     } else {
       const physBody = world.getComponent(rootItemId, 'physicsBody');
       if (physBody) {
-        if (physBody.rawBody) physics.driver?.removeRigidBody(physBody.rawBody);
+        if (physBody.bodyHandle !== undefined) physics.driver?.removeRigidBody(physBody.bodyHandle);
         world.removeComponent(rootItemId, 'physicsBody');
       }
       const renderable = world.getComponent(rootItemId, 'renderable');
@@ -535,9 +525,7 @@ export class AnatomySystem {
     }
 
     for (const partId of plan.graph) {
-      // Принудительно выкидываем предметы из рук отрубленной конечности,
-      // так как она становится физическим пропом (Item Assembly) и теряет анимационный риг
-      forceDropItemFromPart(world, physics, partId);
+      forceDropItemFromPart(world, partId);
 
       const partTransform = world.getComponent(partId, 'transform');
       if (partTransform) {
@@ -550,10 +538,11 @@ export class AnatomySystem {
       const brainComp = world.getComponent(partId, 'bodyBrain');
       if (brainComp) {
         delete brainComp.rootEntityId;
+        brainComp.isActive = false; // Отделенный от сердца мозг прекращает функционировать
       }
       const physBody = world.getComponent(partId, 'physicsBody');
       if (physBody) {
-        if (physBody.rawBody) physics.driver?.removeRigidBody(physBody.rawBody);
+        if (physBody.bodyHandle !== undefined) physics.driver?.removeRigidBody(physBody.bodyHandle);
         world.removeComponent(partId, 'physicsBody');
       }
       world.removeComponent(partId, 'item');

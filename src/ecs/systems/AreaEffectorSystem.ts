@@ -119,7 +119,7 @@ export class AreaEffectorSystem {
             tag?.archetype === 'creature';
 
           if (hasAnatomy) {
-            applyZoneDamageToCreature(world, physics, targetId, deltaValue);
+            applyZoneDamageToCreature(world, targetId, deltaValue);
           } else {
             applyDamage(world, targetId, deltaValue, isPulseTick);
           }
@@ -133,7 +133,7 @@ export class AreaEffectorSystem {
             tag?.archetype === 'creature';
 
           if (hasAnatomy) {
-            applyZoneJointDamageToCreature(world, physics, targetId, deltaValue);
+            applyZoneJointDamageToCreature(world, targetId, deltaValue);
           }
         }
         // 2. Лечение
@@ -164,12 +164,17 @@ export class AreaEffectorSystem {
           const sign = areaEffector.effect === 'repel' ? 1 : -1;
           const weight = physicsStats?.totalWeight ?? physicsStats?.weight.current ?? 1;
 
-          if (physicsBody.rawBody && physicsBody.bodyType === 'dynamic') {
-            if (physicsBody.rawBody.isSleeping()) {
-              physicsBody.rawBody.wakeUp();
+          if (
+            physicsBody.bodyHandle !== undefined &&
+            physicsBody.bodyType === 'dynamic' &&
+            physics.driver
+          ) {
+            if (physics.driver.isBodySleeping(physicsBody.bodyHandle)) {
+              physics.driver.wakeUpBody(physicsBody.bodyHandle);
             }
             const impulseMag = forceMagnitude * dt;
-            physicsBody.rawBody.applyImpulse(
+            physics.driver.applyBodyImpulse(
+              physicsBody.bodyHandle,
               {
                 x: sign * (ux / len) * impulseMag,
                 y: sign * (uy / len) * impulseMag,

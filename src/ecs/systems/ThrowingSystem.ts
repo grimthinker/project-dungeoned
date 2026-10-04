@@ -216,19 +216,28 @@ export class ThrowingSystem {
       itemTransform.z = endZ;
       itemTransform.isDirty = false;
 
-      const rawBody = physics.createDynamicItemBody(world, itemId, { x: endX, y: spawnY, z: endZ });
+      const bodyHandle = physics.createDynamicItemBody(world, itemId, {
+        x: endX,
+        y: spawnY,
+        z: endZ,
+      });
 
-      if (rawBody && !isConstrainedByObstacle) {
+      if (bodyHandle !== undefined && !isConstrainedByObstacle && physics.driver) {
         const startPos = { x: endX, y: spawnY, z: endZ };
         const strength = slot.strength ?? 15;
         const weight = physStats.weight.current ?? 1;
         const vel = calculateThrowVelocity(startPos, targetPos, strength, weight);
 
-        rawBody.applyImpulse({ x: vel.x * weight, y: vel.y * weight, z: vel.z * weight }, true);
-        rawBody.setLinvel({ x: vel.x, y: vel.y, z: vel.z }, true);
-        rawBody.wakeUp();
+        physics.driver.applyBodyImpulse(
+          bodyHandle,
+          { x: vel.x * weight, y: vel.y * weight, z: vel.z * weight },
+          true
+        );
+        physics.driver.setBodyLinearVelocity(bodyHandle, { x: vel.x, y: vel.y, z: vel.z }, true);
+        physics.driver.wakeUpBody(bodyHandle);
 
-        rawBody.setAngvel(
+        physics.driver.setBodyAngularVelocity(
+          bodyHandle,
           { x: (Math.random() - 0.5) * 4, y: 2.0, z: (Math.random() - 0.5) * 4 },
           true
         );

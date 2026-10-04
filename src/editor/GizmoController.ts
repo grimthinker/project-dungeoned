@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { GameApp } from '../GameApp';
 import { TransactionBuilder } from '../history/TransactionBuilder';
 import { GizmoTool } from '../types';
 import { EventBus } from '../core/EventBus';
 import { Radians } from '../types';
+import type { IGizmoContext } from '../core/contexts';
 
 export class GizmoController {
   public tool: GizmoTool = 'translate';
@@ -17,20 +17,20 @@ export class GizmoController {
   private anchorInitialPos = new THREE.Vector3();
   private anchorInitialRot = new THREE.Quaternion();
 
-  constructor(private app: GameApp) {
+  constructor(private ctx: IGizmoContext) {
     EventBus.on('gizmo:dragging-changed', ({ isDragging }) => {
       this._isDragging = isDragging;
       if (isDragging) {
-        const selectedIds = Array.from(this.app.selection.selectedEntityIds);
+        const selectedIds = Array.from(this.ctx.selection.selectedEntityIds);
         if (selectedIds.length > 0) {
-          this.tx = new TransactionBuilder(this.app, 'Трансформация');
+          this.tx = new TransactionBuilder(this.ctx, 'Трансформация');
           this.tx.captureBefore(selectedIds);
 
-          const primaryId = this.app.selection.selectedEntityId;
+          const primaryId = this.ctx.selection.selectedEntityId;
           this.initialTransforms.clear();
 
           for (const id of selectedIds) {
-            const t = this.app.world.getComponent(id, 'transform');
+            const t = this.ctx.world.getComponent(id, 'transform');
             if (t) {
               const pos = new THREE.Vector3(t.x, t.y, t.z);
               const rot = new THREE.Quaternion(
@@ -67,7 +67,7 @@ export class GizmoController {
       const deltaRot = new THREE.Quaternion().copy(primaryInit.rot).invert().premultiply(q);
 
       for (const [entId, initData] of this.initialTransforms.entries()) {
-        const t = this.app.world.getComponent(entId, 'transform');
+        const t = this.ctx.world.getComponent(entId, 'transform');
         if (!t) continue;
 
         let newPos = new THREE.Vector3().copy(initData.pos);
@@ -93,7 +93,7 @@ export class GizmoController {
 
         t.isDirty = true; // Маркируем для безопасного применения в PhysicsSystem
       }
-      this.app.attachmentSystem.update(this.app.world, this.app.physics);
+      this.ctx.syncPhysicsStructures();
     });
   }
 
@@ -108,7 +108,7 @@ export class GizmoController {
   public cancelDrag(revert: boolean = false): void {
     if (revert && this._isDragging) {
       for (const [entId, initData] of this.initialTransforms.entries()) {
-        const t = this.app.world.getComponent(entId, 'transform');
+        const t = this.ctx.world.getComponent(entId, 'transform');
         if (t) {
           t.x = initData.pos.x;
           t.y = initData.pos.y;
@@ -123,7 +123,7 @@ export class GizmoController {
           t.isDirty = true;
         }
       }
-      this.app.attachmentSystem.update(this.app.world, this.app.physics);
+      this.ctx.syncPhysicsStructures();
     }
   }
 }

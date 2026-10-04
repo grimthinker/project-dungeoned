@@ -1,4 +1,3 @@
-import RAPIER from '@dimforge/rapier3d-compat';
 import { World } from '../World';
 import {
   EntityId,
@@ -9,7 +8,11 @@ import {
 } from '../types';
 import { Vec3 } from '../../types';
 import { calculateTotalEntityWeight } from '../utils/hierarchy';
-import { IPhysicsDriver } from '../../physics/IPhysicsDriver';
+import {
+  IPhysicsDriver,
+  PhysicsBodyHandle,
+  PhysicsColliderHandle,
+} from '../../physics/IPhysicsDriver';
 import { BALANCE_CONFIG } from '../../config/balanceConfig';
 import { getTerrainHeightAt } from '../components/terrain';
 import { angleDifference } from '../../utils';
@@ -25,14 +28,11 @@ export class PhysicsSystem {
     this.obstaclesEnabled = enabled;
   }
 
-  /**
-   * Единая точка создания и настройки динамического физического тела предмета на основе его PhysicsStatsComponent.
-   */
   public createDynamicItemBody(
     world: World,
     itemId: EntityId,
     pos: Vec3
-  ): RAPIER.RigidBody | undefined {
+  ): PhysicsBodyHandle | undefined {
     if (!this.driver || !this.driver.isReady) return undefined;
 
     const physStats = world.getComponent(itemId, 'physicsStats');
@@ -40,76 +40,68 @@ export class PhysicsSystem {
 
     const radius = physStats.radius.current ?? 0.3;
     const weight = physStats.weight.current ?? 1;
-
-    const rawBody = this.driver.createDynamicBody(pos, itemId);
     const isBall = physStats.shape === 'ball';
 
     const linDamping = physStats.linearDamping ?? (isBall ? 0.25 : 1);
     const angDamping = physStats.angularDamping ?? (isBall ? 2.0 : 1);
-    rawBody.setLinearDamping(linDamping);
-    rawBody.setAngularDamping(angDamping);
 
-    let rawCollider: RAPIER.Collider;
+    const bodyHandle = this.driver.createDynamicBody(pos, itemId, {
+      linearDamping: linDamping,
+      angularDamping: angDamping,
+    });
+
+    let colliderHandle: PhysicsColliderHandle;
     if (isBall) {
-      rawCollider = this.driver.createBallCollider(radius, rawBody, weight);
       const restitution = physStats.restitution ?? 0.88;
       const friction = physStats.friction ?? 0.85;
-      rawCollider.setRestitution(restitution);
-      rawCollider.setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Max);
-      rawCollider.setFriction(friction);
-      rawCollider.setFrictionCombineRule(RAPIER.CoefficientCombineRule.Max);
+      colliderHandle = this.driver.createBallCollider(radius, bodyHandle, {
+        mass: weight,
+        restitution,
+        friction,
+        useMaxCombineRule: true,
+      });
     } else {
       const size = radius * 0.8;
       const hx = physStats.halfExtents?.x ?? size / 2;
       const hy = physStats.halfExtents?.y ?? size / 2;
       const hz = physStats.halfExtents?.z ?? size / 2;
-
-      rawCollider = this.driver.createCuboidCollider(
-        hx,
-        hy,
-        hz,
-        rawBody,
-        weight,
-        physStats.colliderOffset
-      );
       const restitution = physStats.restitution ?? 0.3;
       const friction = physStats.friction ?? 0.5;
-      rawCollider.setRestitution(restitution);
-      rawCollider.setFriction(friction);
+
+      colliderHandle = this.driver.createCuboidCollider(hx, hy, hz, bodyHandle, {
+        mass: weight,
+        offset: physStats.colliderOffset,
+        restitution,
+        friction,
+      });
     }
 
     const mask = physStats.isSolid ? COLLISION_MASK_ALL : COLLISION_MASK_NONE;
 
     world.addComponent(itemId, 'physicsBody', {
-      rawBody,
-      rawCollider,
+      bodyHandle,
+      colliderHandle,
       bodyType: 'dynamic',
       isStatic: false,
       category: CollisionCategory.ITEM,
       mask,
     });
 
-    return rawBody;
+    return bodyHandle;
   }
 
-  /**
-   * Применяет ручные трансформации (из редактора/UI), помеченные флагом isDirty,
-   * напрямую к телам Rapier3D. Гарантирует отсутствие гонок данных.
-   */
   public syncTerrainPhysics(world: World): void {
     if (!this.driver || !this.driver.isReady) return;
     const terrainEntities = world.getEntitiesWith('terrain');
 
     for (const [id, { terrain }] of terrainEntities) {
       if (terrain.isPhysicsDirty) {
-        // Защитная инициализация для случаев восстановления из старых сейвов или Undo/Redo
         if (!terrain.dirtyChunks) terrain.dirtyChunks = new Set<string>();
 
-        // Если это первый спавн террейна — физика нужна для всех чанков
         const chunksToUpdate =
           terrain.dirtyChunks.size > 0 ? terrain.dirtyChunks : this.getAllChunkIds(terrain);
 
-        const size = 32; // TERRAIN_CONFIG.chunkSize
+        const size = 32;
         const halfW = terrain.width / 2;
         const halfD = terrain.depth / 2;
         const globalRes = terrain.resolution;
@@ -119,21 +111,18 @@ export class PhysicsSystem {
           const startX = cx * size;
           const startZ = cz * size;
 
-          // Валидация выхода за границы массива
           if (startX >= terrain.width || startZ >= terrain.depth) continue;
 
-          // 1. Формируем вершины в ЛОКАЛЬНЫХ координатах чанка
           const verts = new Float32Array((size + 1) * (size + 1) * 3);
           let vIdx = 0;
           for (let z = 0; z <= size; z++) {
             for (let x = 0; x <= size; x++) {
-              verts[vIdx++] = x; // local X
-              verts[vIdx++] = terrain.heights[(startZ + z) * globalRes + (startX + x)] || 0; // global Y
-              verts[vIdx++] = z; // local Z
+              verts[vIdx++] = x;
+              verts[vIdx++] = terrain.heights[(startZ + z) * globalRes + (startX + x)] || 0;
+              verts[vIdx++] = z;
             }
           }
 
-          // 2. Формируем индексы (локальные)
           const indices = new Uint32Array(size * size * 6);
           let iPtr = 0;
           for (let z = 0; z < size; z++) {
@@ -142,7 +131,6 @@ export class PhysicsSystem {
               const b = a + 1;
               const c = (z + 1) * (size + 1) + x;
               const d = c + 1;
-              // Rapier ожидает обход CCW (против часовой стрелки)
               indices[iPtr++] = a;
               indices[iPtr++] = c;
               indices[iPtr++] = b;
@@ -152,7 +140,6 @@ export class PhysicsSystem {
             }
           }
 
-          // 3. Отправляем в Rapier с глобальным смещением
           const pos = { x: startX - halfW, y: 0, z: startZ - halfD };
           this.driver.createOrUpdateTerrainChunk(chunkId, verts, indices, pos, id);
         }
@@ -185,16 +172,16 @@ export class PhysicsSystem {
         transform.isDirty = false;
         anyDirty = true;
 
-        if (physicsBody.rawBody) {
+        if (physicsBody.bodyHandle !== undefined) {
           const pos = { x: transform.x, y: transform.y, z: transform.z };
           const rot = transform.rotation;
 
           if (physicsBody.bodyType === 'kinematicPositionBased') {
-            physicsBody.rawBody.setTranslation(pos, true);
-            physicsBody.rawBody.setNextKinematicTranslation(pos);
+            this.driver.setBodyTranslation(physicsBody.bodyHandle, pos, true);
+            this.driver.setNextKinematicTranslation(physicsBody.bodyHandle, pos);
             if (rot) {
-              physicsBody.rawBody.setRotation(rot, true);
-              physicsBody.rawBody.setNextKinematicRotation(rot);
+              this.driver.setBodyRotation(physicsBody.bodyHandle, rot, true);
+              this.driver.setNextKinematicRotation(physicsBody.bodyHandle, rot);
             }
             const vel = world.getComponent(id, 'velocity');
             if (vel) {
@@ -213,16 +200,17 @@ export class PhysicsSystem {
               );
             }
           } else {
-            physicsBody.rawBody.setTranslation(pos, true);
-            physicsBody.rawBody.setRotation(rot, true);
+            this.driver.setBodyTranslation(physicsBody.bodyHandle, pos, true);
+            if (rot) {
+              this.driver.setBodyRotation(physicsBody.bodyHandle, rot, true);
+            }
             if (physicsBody.bodyType === 'fixed') {
               this.updateObstacleCollider(world, id);
             }
-            // При ручном перемещении гасим текущий импульс (останавливаем полет/падение)
-            physicsBody.rawBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
-            physicsBody.rawBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
-            if (physicsBody.rawBody.isSleeping()) {
-              physicsBody.rawBody.wakeUp();
+            this.driver.setBodyLinearVelocity(physicsBody.bodyHandle, { x: 0, y: 0, z: 0 }, true);
+            this.driver.setBodyAngularVelocity(physicsBody.bodyHandle, { x: 0, y: 0, z: 0 }, true);
+            if (this.driver.isBodySleeping(physicsBody.bodyHandle)) {
+              this.driver.wakeUpBody(physicsBody.bodyHandle);
             }
           }
         }
@@ -242,7 +230,7 @@ export class PhysicsSystem {
   ): void {
     if (!this.driver || !this.driver.isReady) return;
     const phys = world.getComponent(id, 'physicsBody');
-    if (!phys?.rawCollider) return;
+    if (!phys || phys.colliderHandle === undefined) return;
 
     const physStats = world.getComponent(id, 'physicsStats');
     const baseHeight = physStats?.height.current ?? 1.8;
@@ -252,7 +240,6 @@ export class PhysicsSystem {
         stance as keyof typeof BALANCE_CONFIG.creature.stanceHeightMultipliers
       ] ?? 1.0;
 
-    // Аппроксимация для переходных состояний
     if (stance.includes('stand_to_crouch') || stance.includes('crouch_to_stand')) stanceMult = 0.82;
     else if (stance.includes('stand_to_prone') || stance.includes('prone_to_stand'))
       stanceMult = 0.62;
@@ -262,7 +249,6 @@ export class PhysicsSystem {
     const targetHeight = baseHeight * stanceMult;
     let capRadius = radius;
 
-    // Защита: в позе лежа (prone) радиус капсулы не может быть больше её высоты
     if (stance === 'prone' || stance.includes('prone')) {
       capRadius = Math.min(radius, targetHeight / 2);
     }
@@ -270,7 +256,6 @@ export class PhysicsSystem {
     const halfHeight = Math.max(0.01, (targetHeight - 2 * capRadius) / 2);
     const offsetY = halfHeight + capRadius;
 
-    // Кэш-проверка: пропускаем пересчет, если стойка, радиус и рост не изменились
     if (
       phys.currentColliderStance === stance &&
       phys.lastAppliedRadius === capRadius &&
@@ -283,8 +268,8 @@ export class PhysicsSystem {
     phys.lastAppliedRadius = capRadius;
     phys.lastAppliedHeight = targetHeight;
 
-    phys.rawCollider = this.driver.updateCapsuleCollider(
-      phys.rawCollider,
+    phys.colliderHandle = this.driver.updateCapsuleCollider(
+      phys.colliderHandle,
       halfHeight,
       capRadius,
       offsetY
@@ -295,7 +280,7 @@ export class PhysicsSystem {
     if (!this.driver || !this.driver.isReady) return;
     const phys = world.getComponent(id, 'physicsBody');
     const physStats = world.getComponent(id, 'physicsStats');
-    if (!phys || !phys.rawBody || !physStats) return;
+    if (!phys || phys.bodyHandle === undefined || !physStats) return;
 
     const radius = physStats.radius.current;
     const height = physStats.height.current;
@@ -331,28 +316,34 @@ export class PhysicsSystem {
     phys.lastAppliedWidth = curW;
     phys.lastAppliedDepth = curD;
 
-    // Удаляем предыдущие коллайдеры с твердого тела
-    if (phys.rawColliders && phys.rawColliders.length > 0) {
-      for (const col of phys.rawColliders) {
-        (this.driver as any).removeCollider?.(col, false);
+    if (phys.colliderHandles && phys.colliderHandles.length > 0) {
+      for (const colHandle of phys.colliderHandles) {
+        this.driver.removeCollider(colHandle, false);
       }
-    } else if (phys.rawCollider) {
-      (this.driver as any).removeCollider?.(phys.rawCollider, false);
+    } else if (phys.colliderHandle !== undefined) {
+      this.driver.removeCollider(phys.colliderHandle, false);
     }
 
-    const { primaryCollider, allColliders } = buildObstacleColliders(this.driver, phys.rawBody, {
+    const { primaryCollider, allColliders } = buildObstacleColliders(this.driver, phys.bodyHandle, {
       points,
       height,
       colliders: physStats.colliders,
     });
-    phys.rawCollider = primaryCollider;
-    phys.rawColliders = allColliders;
+    phys.colliderHandle = primaryCollider;
+    phys.colliderHandles = allColliders;
   }
 
   public update(dt: number, world: World): void {
     this.syncTerrainPhysics(world);
 
-    // Синхронизация полного веса и коллизий физических тел с актуальными статами
+    // Обработка оторванных и выпавших предметов через интент
+    const droppedIntents = world.getEntitiesWith('droppedItemIntent', 'transform');
+    for (const [itemId, { droppedItemIntent, transform }] of droppedIntents) {
+      world.removeComponent(itemId, 'droppedItemIntent');
+      const pos = droppedItemIntent.position ?? { x: transform.x, y: transform.y, z: transform.z };
+      this.createDynamicItemBody(world, itemId, pos);
+    }
+
     const statEntities = world.getEntitiesWith('physicsBody', 'physicsStats');
     for (const [id, { physicsBody, physicsStats }] of statEntities) {
       physicsStats.totalWeight = calculateTotalEntityWeight(world, id);
@@ -370,11 +361,10 @@ export class PhysicsSystem {
       }
     }
 
-    // 1. Движение персонажей через Kinematic Character Controller (KCC) с 3D-гравитацией
     const movingEntities = world.getEntitiesWith('transform', 'velocity');
     for (const [id, { transform, velocity }] of movingEntities) {
       const phys = world.getComponent(id, 'physicsBody');
-      if (phys?.rawBody && phys.bodyType === 'dynamic') continue;
+      if (phys?.bodyHandle !== undefined && phys.bodyType === 'dynamic') continue;
 
       const health = world.getComponent(id, 'health');
       if (health && !health.isAlive) continue;
@@ -390,7 +380,6 @@ export class PhysicsSystem {
       const extVz = velocity.externalVz ?? 0;
       const meta = world.getComponent(id, 'meta');
 
-      // Гравитация (-9.81 м/с²) и предел скорости свободного падения (для пловцов вертикаль управляется плавучестью)
       const isSwimming = meta?.stance === 'swim';
       if (!isSwimming) {
         velocity.vy = (velocity.vy ?? 0) - 9.81 * localDt;
@@ -401,7 +390,11 @@ export class PhysicsSystem {
       const desiredDy = (velocity.vy + extVy) * localDt;
       const desiredDz = selfDz + extVz * localDt;
 
-      if (phys?.rawCollider && phys.bodyType === 'kinematicPositionBased' && this.driver?.isReady) {
+      if (
+        phys?.colliderHandle !== undefined &&
+        phys.bodyType === 'kinematicPositionBased' &&
+        this.driver?.isReady
+      ) {
         const physStats = world.getComponent(id, 'physicsStats');
         const characterMass = physStats?.totalWeight ?? physStats?.weight.current ?? 75;
 
@@ -409,16 +402,14 @@ export class PhysicsSystem {
         const minSlideAngle =
           movementStats?.minSlopeSlideAngle ?? BALANCE_CONFIG.creature.minSlopeSlideAngle;
 
-        // Предыдущее состояние контакта со склоном
         const prevSlope = velocity.slopeAngleDeg ?? 0;
         const wasSliding = (velocity.isGrounded ?? true) && prevSlope > minSlideAngle;
         const isAirborne =
           (meta?.stance === 'airborne' || velocity.isGrounded === false) && !wasSliding;
 
-        // Расчет перемещения через KCC контроллер (в воде отключаем snap-to-ground, чтобы пловца не тянуло ко дну)
         const { movement, isGrounded, groundNormal, slopeAngleDeg } =
           this.driver.computeCharacterMovement(
-            phys.rawCollider,
+            phys.colliderHandle,
             { x: desiredDx, y: desiredDy, z: desiredDz },
             characterMass,
             isAirborne || isSwimming
@@ -433,20 +424,17 @@ export class PhysicsSystem {
         const currentSlope = slopeAngleDeg ?? 0;
         const isSlidingNow = currentSlope > minSlideAngle;
 
-        // Определение контакта с землей: на крутом склоне считаем существо на земле, если оно упирается в склон
         let grounded = isGrounded;
         if (
           !isSwimming &&
           (isGrounded || (Math.abs(movement.y - desiredDy) > 0.0001 && desiredDy < 0))
         ) {
           grounded = true;
-          // Обнуляем вертикальную скорость только на ровной поверхности, при скольжении сохраняем импульс вниз
           if (!isSlidingNow) {
             velocity.vy = 0;
           }
         }
 
-        // --- МАТЕМАТИЧЕСКИЙ ЩИТ: защита от проваливания сквозь полигоны террейна ---
         const terrainEntities = world.getEntitiesWith('terrain');
         if (terrainEntities.length > 0) {
           const terrainComp = terrainEntities[0][1].terrain;
@@ -461,7 +449,6 @@ export class PhysicsSystem {
           }
         }
 
-        // Страховочный сброс при падении за границу карты
         if (transform.y < -50) {
           transform.y = 0;
           velocity.vy = 0;
@@ -472,7 +459,6 @@ export class PhysicsSystem {
         velocity.groundNormal = groundNormal;
         velocity.slopeAngleDeg = currentSlope;
 
-        // Плавное нарастание скорости скольжения вниз по склону
         if (grounded && isSlidingNow && groundNormal) {
           const slideAccel =
             movementStats?.slopeSlideAcceleration ?? BALANCE_CONFIG.creature.slopeSlideAcceleration;
@@ -488,20 +474,19 @@ export class PhysicsSystem {
             );
             const effectiveAccel = slideAccel * (0.8 + 0.6 * slopeFactor);
 
-            // Накапливаем внешнюю скорость непрерывно
             velocity.externalVx = (velocity.externalVx ?? 0) + downX * effectiveAccel * localDt;
             velocity.externalVz = (velocity.externalVz ?? 0) + downZ * effectiveAccel * localDt;
           }
         }
 
-        if (phys.rawBody) {
-          phys.rawBody.setNextKinematicTranslation({
+        if (phys.bodyHandle !== undefined) {
+          this.driver.setNextKinematicTranslation(phys.bodyHandle, {
             x: transform.x,
             y: transform.y,
             z: transform.z,
           });
           if (transform.rotation) {
-            phys.rawBody.setNextKinematicRotation(transform.rotation);
+            this.driver.setNextKinematicRotation(phys.bodyHandle, transform.rotation);
           }
         }
       } else {
@@ -511,7 +496,6 @@ export class PhysicsSystem {
         velocity.isGrounded = transform.y <= 0;
       }
 
-      // Плавное затухание внешнего импульса без сброса накопленной скорости
       const curExtVx = velocity.externalVx ?? 0;
       const curExtVy = velocity.externalVy ?? 0;
       const curExtVz = velocity.externalVz ?? 0;
@@ -529,7 +513,6 @@ export class PhysicsSystem {
       }
     }
 
-    // 2. Мягкое расталкивание существ (Soft Collision) пропорционально массе
     const activeCreatures = world
       .getEntitiesWith('transform', 'physicsStats', 'health', 'physicsBody')
       .filter(
@@ -564,7 +547,7 @@ export class PhysicsSystem {
           const ratioA = mB / totalMass;
           const ratioB = mA / totalMass;
 
-          const pushFactor = 0.5; // Плавное демпфирование расталкивания
+          const pushFactor = 0.5;
           const pushX = nx * overlap * pushFactor;
           const pushZ = nz * overlap * pushFactor;
 
@@ -574,15 +557,15 @@ export class PhysicsSystem {
           compB.transform.x -= pushX * ratioB;
           compB.transform.z -= pushZ * ratioB;
 
-          if (compA.physicsBody.rawBody) {
-            compA.physicsBody.rawBody.setNextKinematicTranslation({
+          if (compA.physicsBody.bodyHandle !== undefined && this.driver) {
+            this.driver.setNextKinematicTranslation(compA.physicsBody.bodyHandle, {
               x: compA.transform.x,
               y: compA.transform.y,
               z: compA.transform.z,
             });
           }
-          if (compB.physicsBody.rawBody) {
-            compB.physicsBody.rawBody.setNextKinematicTranslation({
+          if (compB.physicsBody.bodyHandle !== undefined && this.driver) {
+            this.driver.setNextKinematicTranslation(compB.physicsBody.bodyHandle, {
               x: compB.transform.x,
               y: compB.transform.y,
               z: compB.transform.z,
@@ -592,27 +575,35 @@ export class PhysicsSystem {
       }
     }
 
-    // 3. Динамическое масштабирование физики в Rapier для тел с timeScale (палки, ящики, камни)
     const dynamicBodies = world.getEntitiesWith('physicsBody');
     const currentDynamicIds = new Set<string>();
 
     for (const [id, { physicsBody }] of dynamicBodies) {
-      if (!physicsBody.rawBody || physicsBody.bodyType !== 'dynamic') continue;
+      if (physicsBody.bodyHandle === undefined || physicsBody.bodyType !== 'dynamic') continue;
 
       currentDynamicIds.add(id);
-      const rawBody = physicsBody.rawBody;
       const ts = world.getComponent(id, 'timeScale')?.multiplier.current ?? 1.0;
       const prevTs = this.dynamicBodyTimeScales.get(id) ?? 1.0;
 
-      if (Math.abs(ts - prevTs) > 0.001) {
-        const ratio = prevTs > 0.0001 ? ts / prevTs : ts;
-        const linvel = rawBody.linvel();
-        const angvel = rawBody.angvel();
+      if (Math.abs(ts - prevTs) > 0.001 && this.driver) {
+        const state = this.driver.getBodyState(physicsBody.bodyHandle);
+        if (state) {
+          const ratio = prevTs > 0.0001 ? ts / prevTs : ts;
+          const linvel = state.linvel;
+          const angvel = state.angvel;
 
-        rawBody.setLinvel({ x: linvel.x * ratio, y: linvel.y * ratio, z: linvel.z * ratio }, true);
-        rawBody.setAngvel({ x: angvel.x * ratio, y: angvel.y * ratio, z: angvel.z * ratio }, true);
-        // Гравитация масштабируется квадратично: g' = g * S^2
-        rawBody.setGravityScale(ts * ts, true);
+          this.driver.setBodyLinearVelocity(
+            physicsBody.bodyHandle,
+            { x: linvel.x * ratio, y: linvel.y * ratio, z: linvel.z * ratio },
+            true
+          );
+          this.driver.setBodyAngularVelocity(
+            physicsBody.bodyHandle,
+            { x: angvel.x * ratio, y: angvel.y * ratio, z: angvel.z * ratio },
+            true
+          );
+          this.driver.setBodyGravityScale(physicsBody.bodyHandle, ts * ts, true);
+        }
         this.dynamicBodyTimeScales.set(id, ts);
       }
     }
@@ -623,7 +614,6 @@ export class PhysicsSystem {
       }
     }
 
-    // 4. Шаг физической симуляции Rapier3D
     if (this.driver && this.driver.isReady) {
       this.driver.step(dt);
     }
@@ -634,7 +624,6 @@ export class PhysicsSystem {
     const attackerTransform = world.getComponent(attackerId, 'transform');
     if (!attackerTransform || !this.driver) return hitEntities;
 
-    // Смещение по высоте, чтобы луч/сфера исходили из груди, а не скользили по полу (ступням)
     const heightOffset = 0.9;
     const pos = {
       x: attackerTransform.x,
@@ -685,11 +674,9 @@ export class PhysicsSystem {
           }
         }
 
-        // Проверка препятствий (Line of Sight)
         if (zone.pierceObstacles && zone.pierceCreatures && zone.pierceItems) {
           hitEntities.push(targetId);
         } else {
-          // Пускаем луч к цели, чтобы проверить перекрытие
           const dx = transform.x - pos.x;
           const dy = targetY - pos.y;
           const dz = transform.z - pos.z;
@@ -701,7 +688,7 @@ export class PhysicsSystem {
 
             let blocked = false;
             for (const hit of hitList) {
-              if (hit.entityId === targetId) break; // Дошли до цели
+              if (hit.entityId === targetId) break;
 
               const tag = world.getComponent(hit.entityId, 'tag');
               const meta = world.getComponent(hit.entityId, 'meta');
@@ -749,7 +736,6 @@ export class PhysicsSystem {
         const isDead = health && !health.isAlive;
         const isTrigger = phys?.isTrigger;
 
-        // Мертвецов и триггеры всегда прошиваем насквозь
         if (isDead || isTrigger) continue;
 
         let canPierce = false;
@@ -761,7 +747,6 @@ export class PhysicsSystem {
           hitSet.add(targetId);
         }
 
-        // Если пробитие для данного типа не разрешено — луч прерывается
         if (!canPierce) {
           break;
         }

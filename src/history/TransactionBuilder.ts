@@ -1,6 +1,6 @@
 import { EntitySnapshotCommand } from './commands/EntitySnapshotCommand';
 import { SerializedEntityData } from '../ecs/WorldSerializer';
-import { IEditorContext } from '../core/contexts';
+import { ITransactionContext } from '../core/contexts';
 
 export class TransactionBuilder {
   private beforeEntities: SerializedEntityData[] = [];
@@ -8,7 +8,7 @@ export class TransactionBuilder {
   private beforeSelection: { id: string | null; ids: string[] };
 
   constructor(
-    private ctx: IEditorContext,
+    private ctx: ITransactionContext,
     private description: string
   ) {
     this.beforeSelection = {

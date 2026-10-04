@@ -1,19 +1,16 @@
-import { GameApp } from '../GameApp';
+import type { IItemTransferContext } from '../core/contexts';
 import { TransactionBuilder } from '../history/TransactionBuilder';
 import {
   TransferTarget,
   findItemLocation,
   validateItemTransfer,
 } from '../ecs/utils/itemValidation';
-import { CollisionCategory, COLLISION_MASK_ALL, COLLISION_MASK_NONE } from '../ecs/types';
-import { Vec3 } from '../types';
-import RAPIER from '@dimforge/rapier3d-compat';
 
 export class ItemTransferService {
-  constructor(private app: GameApp) {}
+  constructor(private ctx: IItemTransferContext) {}
 
   public transferItem(itemId: string, target: TransferTarget): boolean {
-    const world = this.app.world;
+    const world = this.ctx.world;
     const source = findItemLocation(world, itemId);
     if (!source) return false;
 
@@ -25,7 +22,7 @@ export class ItemTransferService {
     const validation = validateItemTransfer(world, itemId, target);
     if (!validation.valid) return false;
 
-    const tx = new TransactionBuilder(this.app, 'Перемещение предмета');
+    const tx = new TransactionBuilder(this.ctx, 'Перемещение предмета');
     const affectedIds = new Set<string>([itemId]);
 
     // Сохраняем состояние источников и приемников для Undo/Redo
@@ -57,26 +54,26 @@ export class ItemTransferService {
 
     // Если перемещенный предмет был выбран на холсте, а теперь попал в экипировку/инвентарь:
     // снимаем с него выделение, чтобы не оставался фантомный фокус
-    if (target.type !== 'ground' && this.app.selection.selectedEntityId === itemId) {
-      this.app.selection.deselectEntity(itemId);
+    if (target.type !== 'ground' && this.ctx.selection.selectedEntityId === itemId) {
+      this.ctx.selection.deselectEntity(itemId);
     }
     if (
       validation.isSwap &&
       validation.swapItemId &&
       source.type !== 'ground' &&
-      this.app.selection.selectedEntityId === validation.swapItemId
+      this.ctx.selection.selectedEntityId === validation.swapItemId
     ) {
-      this.app.selection.deselectEntity(validation.swapItemId);
+      this.ctx.selection.deselectEntity(validation.swapItemId);
     }
 
-    this.app.syncPhysicsStructures();
+    this.ctx.syncPhysicsStructures();
     tx.commit();
-    this.app.captureBaseState();
+    this.ctx.captureBaseState();
     return true;
   }
 
   private removeItem(itemId: string, location: TransferTarget): void {
-    const world = this.app.world;
+    const world = this.ctx.world;
     if (location.type === 'slot') {
       const slot = world.getComponent(location.partId, 'interactionSlots');
       if (slot && slot.itemId === itemId) slot.itemId = null;
@@ -109,13 +106,7 @@ export class ItemTransferService {
         }
       }
     } else if (location.type === 'ground') {
-      const physBody = world.getComponent(itemId, 'physicsBody');
-      if (physBody) {
-        if (physBody.rawBody) {
-          this.app.physicsDriver.removeRigidBody(physBody.rawBody);
-        }
-        world.removeComponent(itemId, 'physicsBody');
-      }
+      this.ctx.removePhysicsBody(itemId);
     }
     world.removeComponent(itemId, 'ownership');
     const renderable = world.getComponent(itemId, 'renderable');
@@ -123,7 +114,7 @@ export class ItemTransferService {
   }
 
   private placeItem(itemId: string, location: TransferTarget, source?: TransferTarget): void {
-    const world = this.app.world;
+    const world = this.ctx.world;
     const item = world.getComponent(itemId, 'item');
     if (!item) return;
 
@@ -206,13 +197,10 @@ export class ItemTransferService {
         }
       }
 
-      const defaultX = this.app.camera.targetX ?? 0;
-      const defaultY = (this.app.camera.targetY ?? 0) + 1.0;
-      const defaultZ = this.app.camera.targetZ ?? 0;
-
-      posX = posX ?? defaultX;
-      posY = posY ?? defaultY;
-      posZ = posZ ?? defaultZ;
+      const defaultPos = this.ctx.getViewFocusPosition();
+      posX = posX ?? defaultPos.x;
+      posY = posY ?? defaultPos.y;
+      posZ = posZ ?? defaultPos.z;
 
       if (transform) {
         transform.x = posX;
@@ -232,7 +220,7 @@ export class ItemTransferService {
       const physStats = world.getComponent(itemId, 'physicsStats');
       if (physStats) {
         const pos3D = { x: posX, y: posY ?? 1.5, z: posZ };
-        this.app.physics.createDynamicItemBody(world, itemId, pos3D);
+        this.ctx.createDynamicItemBody(itemId, pos3D);
       }
       const renderable = world.getComponent(itemId, 'renderable');
       if (renderable) renderable.isVisible = true;

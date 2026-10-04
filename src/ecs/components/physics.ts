@@ -1,6 +1,6 @@
-import RAPIER from '@dimforge/rapier3d-compat';
 import { Point, Vec3, Quat, Radians } from '../../types';
 import { StatValue } from './stats';
+import { PhysicsBodyHandle, PhysicsColliderHandle } from '../../physics/IPhysicsDriver';
 
 export type PhysicsBodyType = 'dynamic' | 'fixed' | 'kinematicPositionBased';
 
@@ -27,12 +27,12 @@ export interface ColliderPartDesc {
 }
 
 export interface PhysicsBodyComponent {
-  /** Нативное твердое тело Rapier3D (WASM) */
-  rawBody?: RAPIER.RigidBody;
-  /** Основной коллайдер тела в Rapier3D */
-  rawCollider?: RAPIER.Collider;
-  /** Список всех составных коллайдеров тела в Rapier3D */
-  rawColliders?: RAPIER.Collider[];
+  /** Числовой дескриптор твердого тела в физическом движке */
+  bodyHandle?: PhysicsBodyHandle;
+  /** Числовой дескриптор основного коллайдера */
+  colliderHandle?: PhysicsColliderHandle;
+  /** Список дескрипторов всех составных коллайдеров */
+  colliderHandles?: PhysicsColliderHandle[];
   /** Тип физического поведения в 3D */
   bodyType?: PhysicsBodyType;
 

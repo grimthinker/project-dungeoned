@@ -13,6 +13,7 @@ import { WaterComponent, WaterConfig } from '../components/water';
 import { createStat } from '../stats/StatEvaluator';
 import { createRectanglePoints } from '../../utils';
 import { GRAPHICS_CONFIG } from '../../config/graphicsConfig';
+import { PhysicsBodyHandle, PhysicsColliderHandle } from '../../physics/IPhysicsDriver';
 
 export function createWaterConfig(
   waterType: 'lake' | 'river' = 'lake',
@@ -153,28 +154,25 @@ export function assembleWater(
   const category = CollisionCategory.TRIGGER_ZONE;
   const mask = CollisionCategory.CREATURE | CollisionCategory.ITEM;
 
-  let rawBody: any = undefined;
-  let rawCollider: any = undefined;
+  let bodyHandle: PhysicsBodyHandle | undefined = undefined;
+  let colliderHandle: PhysicsColliderHandle | undefined = undefined;
 
   if (physics.driver && physics.driver.isReady) {
     const pos3D = { x: posX, y: posY, z: posZ };
-    rawBody = physics.driver.createFixedBody(pos3D, id);
+    bodyHandle = physics.driver.createFixedBody(pos3D, id);
     const hx = width / 2;
     const hz = depth / 2;
     const hy = maxDepth / 2;
-    rawCollider = physics.driver.createCuboidCollider(hx, hy, hz, rawBody, 0, {
-      x: 0,
-      y: -hy,
-      z: 0,
+    colliderHandle = physics.driver.createCuboidCollider(hx, hy, hz, bodyHandle, {
+      mass: 0,
+      offset: { x: 0, y: -hy, z: 0 },
+      isSensor: true,
     });
-    if (rawCollider) {
-      rawCollider.setSensor(true);
-    }
   }
 
   world.addComponent(id, 'physicsBody', {
-    rawBody,
-    rawCollider,
+    bodyHandle,
+    colliderHandle,
     bodyType: 'fixed',
     isStatic: true,
     category,

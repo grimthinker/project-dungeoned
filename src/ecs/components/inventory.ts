@@ -162,6 +162,10 @@ export interface DropItemIntentComponent {
   slotIndex: number;
 }
 
+export interface DroppedItemIntentComponent {
+  position?: Vec3;
+}
+
 export interface OwnershipComponent {
   ownerId: EntityId;
   status: 'equipped' | 'inventory';

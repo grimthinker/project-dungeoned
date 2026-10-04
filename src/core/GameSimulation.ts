@@ -89,7 +89,6 @@ export class GameSimulation {
     this.entityFactory = new EntityFactory();
     this.serializer = new WorldSerializer(app);
 
-    // Доступ к 3D-сцене и WebGL-рендереру для синхронизатора через фасад GameApp
     this.threeSyncSystem = new ThreeSyncSystem(
       (app.renderer as any).scene,
       (app.renderer as any).renderer
@@ -104,7 +103,6 @@ export class GameSimulation {
     if (this.app.gameMode === GameMode.GAME && mousePos) {
       const worldPoint = this.app.getCanvasPoint(mousePos.x, mousePos.y, playerId);
 
-      // Проверка дистанции потери цели и ориентация головы игрока
       const selectedId = this.app.selection.selectedEntityId;
       let isAimingAtTarget = false;
 
@@ -158,7 +156,6 @@ export class GameSimulation {
         this.updatePlayerAim(worldPoint);
       }
 
-      // Непрерывное обновление точки навигации при удерживаемой ПКМ раз в 0.1 сек
       if (GlobalInput.isRmbDown) {
         this.playerNavTimer += dt;
         if (this.playerNavTimer >= GAMEPLAY_CONFIG.rmbNavUpdateInterval) {
@@ -174,7 +171,6 @@ export class GameSimulation {
       this.playerNavTimer = 0;
     }
 
-    // Привязка фокуса камеры к голове игрока в режиме игры
     if (this.app.gameMode === GameMode.GAME) {
       const headPos = this.getPlayerHeadPosition();
       if (headPos) {
@@ -304,13 +300,14 @@ export class GameSimulation {
   public syncDynamicBodiesToTransforms(): void {
     const dynamicEntities = this.world.getEntitiesWith('transform', 'physicsBody');
     for (const [id, { transform, physicsBody }] of dynamicEntities) {
-      if (physicsBody.rawBody && physicsBody.bodyType === 'dynamic') {
-        if (physicsBody.rawBody.isSleeping()) continue;
+      if (physicsBody.bodyHandle !== undefined && physicsBody.bodyType === 'dynamic') {
+        const state = this.physicsDriver.getBodyState(physicsBody.bodyHandle);
+        if (!state || state.isSleeping) continue;
 
-        const translation = physicsBody.rawBody.translation();
-        const rotation = physicsBody.rawBody.rotation();
-        const linvel = physicsBody.rawBody.linvel();
-        const angvel = physicsBody.rawBody.angvel();
+        const translation = state.translation;
+        const rotation = state.rotation;
+        const linvel = state.linvel;
+        const angvel = state.angvel;
 
         transform.x = translation.x;
         transform.y = translation.y;
@@ -477,8 +474,8 @@ export class GameSimulation {
       }
     }
     const phys = this.world.getComponent(id, 'physicsBody');
-    if (phys && phys.rawBody) {
-      this.physicsDriver.removeRigidBody(phys.rawBody);
+    if (phys && phys.bodyHandle !== undefined) {
+      this.physicsDriver.removeRigidBody(phys.bodyHandle);
     }
     this.aiSystem.unregisterEntity(id);
     this.world.removeEntity(id);
@@ -488,8 +485,8 @@ export class GameSimulation {
     this.playerEntityId = null;
     const entities = this.world.getAllEntities();
     for (const [id, comp] of entities) {
-      if (comp.physicsBody?.rawBody) {
-        this.physicsDriver.removeRigidBody(comp.physicsBody.rawBody);
+      if (comp.physicsBody?.bodyHandle !== undefined) {
+        this.physicsDriver.removeRigidBody(comp.physicsBody.bodyHandle);
       }
       this.world.removeEntity(id);
     }

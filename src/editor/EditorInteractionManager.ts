@@ -83,7 +83,7 @@ export class EditorInteractionManager {
     if (this.app.gameMode !== GameMode.EDITOR) return;
 
     const currentIds = Array.from(this.selection.selectedEntityIds);
-    const currentExpanded = this.app.simulation.gatherHierarchyIds(currentIds);
+    const currentExpanded = this.app.gatherHierarchyIds(currentIds);
 
     const allAffected = new Set<string>();
     this.baseStateForCommit.forEach((e) => allAffected.add(e.id));
@@ -102,7 +102,7 @@ export class EditorInteractionManager {
       { id: this.selection.selectedEntityId, ids: currentIds }
     );
     this.commandHistory.push(command);
-    this.app.simulation.syncPhysicsStructures();
+    this.app.syncPhysicsStructures();
     this.captureBaseState();
   }
 
@@ -139,11 +139,11 @@ export class EditorInteractionManager {
     tx.captureBefore(ids);
 
     for (const id of ids) {
-      this.app.simulation.deleteEntityRecursive(id);
+      this.app.deleteEntityRecursive(id);
       if (this.selection.hoveredEntityId === id) this.selection.hoverEntity(null);
     }
 
-    this.app.simulation.syncPhysicsStructures();
+    this.app.syncPhysicsStructures();
     this.selection.clear();
     tx.commit();
     this.captureBaseState();

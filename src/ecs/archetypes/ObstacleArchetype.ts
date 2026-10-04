@@ -1,4 +1,3 @@
-import RAPIER from '@dimforge/rapier3d-compat';
 import { World } from '../World';
 import { PhysicsSystem } from '../systems/PhysicsSystem';
 import { AISystem } from '../systems/AISystem';
@@ -20,6 +19,7 @@ import {
 } from '../../utils';
 import { createStat } from '../stats/StatEvaluator';
 import { fastClone } from '../utils/clone';
+import { PhysicsBodyHandle, PhysicsColliderHandle } from '../../physics/IPhysicsDriver';
 
 import { buildObstacleColliders } from '../utils/obstacleColliders';
 export { buildObstacleColliders };
@@ -85,13 +85,11 @@ export function createHouseConfig(position?: Vec3, angle: Radians = 0 as Radians
       isSolid: true,
       points: createRectanglePoints(width, depth),
       colliders: [
-        // 1. Нижняя часть (цоколь и стены от y=0 до y=3.0)
         {
           shape: 'cuboid',
           halfExtents: { x: 2.4, y: 1.5, z: 2.6 },
           offset: { x: 0, y: 1.5, z: 0 },
         },
-        // 2. Верхняя наклонная двускатная крыша (выпуклая треугольная призма от y=3.0 до конька y=5.2)
         {
           shape: 'convexHull',
           points: [
@@ -152,6 +150,7 @@ export function createTreeConfig(
     },
   };
 }
+
 export function createSignpostConfig(position?: Vec3, angle: Radians = 0 as Radians): EntityConfig {
   const height = 2.1;
   const radius = 0.14;
@@ -398,16 +397,13 @@ export function createBridgeConfig(position?: Vec3, angle: Radians = 0 as Radian
   const depth = 6.0;
   const height = 1.2;
 
-  // Формируем выпуклую оболочку (Convex Hull) для плавного подъема по мосту
   const hullPts: number[] = [];
   for (let i = 0; i <= 6; i++) {
     const t = i / 6;
     const z = -depth / 2 + t * depth;
-    const y = Math.sin(t * Math.PI) * 0.85; // высота арки
-    // Левая и правая стороны полотна
+    const y = Math.sin(t * Math.PI) * 0.85;
     hullPts.push(-width / 2, y, z);
     hullPts.push(width / 2, y, z);
-    // Добавляем точки чуть ниже для толщины
     hullPts.push(-width / 2, y - 0.2, z);
     hullPts.push(width / 2, y - 0.2, z);
   }
@@ -687,28 +683,27 @@ export function assembleObstacle(
   const category = CollisionCategory.OBSTACLE;
   const mask = isSolid && hp > 0 ? COLLISION_MASK_ALL : COLLISION_MASK_NONE;
 
-  let rawBody: RAPIER.RigidBody | undefined;
-  let rawCollider: RAPIER.Collider | undefined;
-  let rawColliders: RAPIER.Collider[] | undefined;
+  let bodyHandle: PhysicsBodyHandle | undefined;
+  let colliderHandle: PhysicsColliderHandle | undefined;
+  let colliderHandles: PhysicsColliderHandle[] | undefined;
 
   if (physics.driver && physics.driver.isReady) {
     const pos3D = { x: posX, y: posY, z: posZ };
-    rawBody = physics.driver.createFixedBody(pos3D, id);
-    rawBody.setRotation(rotation, false);
+    bodyHandle = physics.driver.createFixedBody(pos3D, id, { rotation });
 
-    const built = buildObstacleColliders(physics.driver, rawBody, {
+    const built = buildObstacleColliders(physics.driver, bodyHandle, {
       points,
       height: config.physics?.height ?? 1.5,
       colliders: config.physics?.colliders,
     });
-    rawCollider = built.primaryCollider;
-    rawColliders = built.allColliders;
+    colliderHandle = built.primaryCollider;
+    colliderHandles = built.allColliders;
   }
 
   world.addComponent(id, 'physicsBody', {
-    rawBody,
-    rawCollider,
-    rawColliders,
+    bodyHandle,
+    colliderHandle,
+    colliderHandles,
     bodyType: 'fixed',
     isStatic: true,
     category,

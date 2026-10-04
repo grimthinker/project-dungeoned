@@ -151,7 +151,7 @@ export class InteractionSystem {
     if (!action) return false;
 
     if (action.type === 'throw') {
-      return false; // Делегируется в ThrowingSystem
+      return false;
     }
 
     if (action.type === 'pickup') {
@@ -253,7 +253,7 @@ export class InteractionSystem {
     const entities = world.getEntitiesWith('interactionAction', 'transform', 'health');
 
     for (const [id, { interactionAction, transform, health }] of entities) {
-      if (interactionAction.type === 'throw') continue; // Обрабатывается в ThrowingSystem
+      if (interactionAction.type === 'throw') continue;
 
       const ts = world.getComponent(id, 'timeScale')?.multiplier.current ?? 1.0;
       const localDt = dt * ts;
@@ -405,8 +405,8 @@ export class InteractionSystem {
             EventBus.emit('inventory:updated');
 
             const physBody = world.getComponent(targetId, 'physicsBody');
-            if (physBody && physBody.rawBody) {
-              physics.driver?.removeRigidBody(physBody.rawBody);
+            if (physBody && physBody.bodyHandle !== undefined) {
+              physics.driver?.removeRigidBody(physBody.bodyHandle);
               world.removeComponent(targetId, 'physicsBody');
             }
             const renderable = world.getComponent(targetId, 'renderable');
@@ -711,13 +711,21 @@ export class InteractionSystem {
       itemTransform.z = endZ;
       itemTransform.isDirty = false;
 
-      const rawBody = physics.createDynamicItemBody(world, itemId, { x: endX, y: dropY, z: endZ });
+      const bodyHandle = physics.createDynamicItemBody(world, itemId, {
+        x: endX,
+        y: dropY,
+        z: endZ,
+      });
 
-      if (rawBody && !isConstrainedByObstacle) {
+      if (bodyHandle !== undefined && !isConstrainedByObstacle && physics.driver) {
         const weight = physStats.weight.current ?? 1;
         const targetVelocity = 0.5;
         const impulseMag = weight * targetVelocity;
-        rawBody.applyImpulse({ x: dir.x * impulseMag, y: 0, z: dir.z * impulseMag }, true);
+        physics.driver.applyBodyImpulse(
+          bodyHandle,
+          { x: dir.x * impulseMag, y: 0, z: dir.z * impulseMag },
+          true
+        );
       }
     }
   }

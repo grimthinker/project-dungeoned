@@ -17,12 +17,12 @@ import { EditorInteractionManager } from './editor/EditorInteractionManager';
 import { PhysicalRaycastResult } from './physics/IPhysicsDriver';
 import { calculateThrowVelocity } from './utils';
 import { FPSMonitor } from './core/FPSMonitor';
-import { IEditorContext } from './core/contexts';
+import { IEditorContext, ISelectionHostContext } from './core/contexts';
 import { ICommand } from './history/ICommand';
 
 export { EntityAdapter } from './EntityAdapter';
 
-export class GameApp implements IEditorContext {
+export class GameApp implements IEditorContext, ISelectionHostContext {
   private container: HTMLDivElement;
   public renderer: IRenderer;
   public camera: Camera;
@@ -102,7 +102,6 @@ export class GameApp implements IEditorContext {
   private lastBTUpdate: number = 0;
   private lastBTTargetId: string | null = null;
 
-  // --- ФАСАДЫ ДЛЯ ОБРАТНОЙ СОВМЕСТИМОСТИ (UI / ECS) ---
   public get world() {
     return this.simulation.world;
   }
@@ -271,7 +270,6 @@ export class GameApp implements IEditorContext {
     AssetManager.getInstance().clear();
   }
 
-  // --- ДЕЛЕГАТЫ СИМУЛЯЦИИ И ФИЗИКИ ---
   public markPhysicsStructureDirty(): void {
     this.simulation.markPhysicsStructureDirty();
   }
@@ -323,8 +321,8 @@ export class GameApp implements IEditorContext {
   public removeEntityDirectly(id: string): void {
     if (this.world.getEntity(id)) {
       const phys = this.world.getComponent(id, 'physicsBody');
-      if (phys && phys.rawBody) {
-        this.physicsDriver?.removeRigidBody(phys.rawBody);
+      if (phys && phys.bodyHandle !== undefined) {
+        this.physicsDriver?.removeRigidBody(phys.bodyHandle);
       }
       this.world.removeEntity(id);
       this.aiSystem.unregisterEntity(id);
@@ -333,6 +331,28 @@ export class GameApp implements IEditorContext {
   public pushCommand(command: ICommand): void {
     this.commandHistory.push(command);
   }
+  public generateEntityId(prefix: string = 'ent'): string {
+    return this.entityFactory.generateId(prefix);
+  }
+  public createDynamicItemBody(itemId: string, pos: Vec3): void {
+    this.physics.createDynamicItemBody(this.world, itemId, pos);
+  }
+  public removePhysicsBody(itemId: string): void {
+    const physBody = this.world.getComponent(itemId, 'physicsBody');
+    if (physBody) {
+      if (physBody.bodyHandle !== undefined && this.physicsDriver) {
+        this.physicsDriver.removeRigidBody(physBody.bodyHandle);
+      }
+      this.world.removeComponent(itemId, 'physicsBody');
+    }
+  }
+  public getViewFocusPosition(): Vec3 {
+    return {
+      x: this.camera.targetX ?? 0,
+      y: (this.camera.targetY ?? 0) + 1.0,
+      z: this.camera.targetZ ?? 0,
+    };
+  }
   public clearPlayerAim(): void {
     this.simulation.clearPlayerAim();
   }
@@ -340,7 +360,6 @@ export class GameApp implements IEditorContext {
     return this.simulation.getPlayerEntityId();
   }
 
-  // --- ДЕЛЕГАТЫ РЕДАКТОРА ---
   public executeTransaction<T>(description: string, action: () => T): T {
     return this.editor.executeTransaction(description, action);
   }
@@ -366,7 +385,6 @@ export class GameApp implements IEditorContext {
     return this.editor.duplicateEntities(ids, offset);
   }
 
-  // --- ВЗАИМОДЕЙСТВИЕ И РЕНДЕР ---
   public updateBTData(force: boolean = false): void {
     const targetId = this.selection.selectedEntityId;
     const now = performance.now();

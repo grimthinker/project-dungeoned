@@ -1,13 +1,37 @@
 import { World } from '../World';
 import { Point, Vec3 } from '../../types';
 import { calculateTotalEntityWeight, isDescendantOf, isItemEquippableToArea } from './hierarchy';
-import { findActiveBrain } from './anatomy';
 
 export type TransferTarget =
   | { type: 'slot'; partId: string }
   | { type: 'area'; containerId: string; areaId: string }
   | { type: 'inventory'; containerId: string; row?: number; col?: number }
   | { type: 'ground'; position?: Vec3; parentEntityId?: string };
+
+function hasActiveBrainOrLiving(world: World, entityId: string): boolean {
+  // 1. Полноценное живое существо никогда нельзя подобрать как предмет
+  const tag = world.getComponent(entityId, 'tag');
+  if (tag?.archetype === 'creature') return true;
+
+  // 2. Если сущность уже стала предметом (лутом / останками на полу), её разрешено поднимать
+  if (world.getComponent(entityId, 'item')) {
+    return false;
+  }
+
+  // 3. Защита от поднятия функционирующих частей живого существа прямо "на лету"
+  const brain = world.getComponent(entityId, 'bodyBrain');
+  if (brain && brain.isActive) return true;
+
+  const assembly = world.getComponent(entityId, 'assemblyRoot');
+  if (assembly && assembly.partIds) {
+    for (const partId of assembly.partIds) {
+      const partBrain = world.getComponent(partId, 'bodyBrain');
+      if (partBrain && partBrain.isActive) return true;
+    }
+  }
+
+  return false;
+}
 
 /**
  * Проверяет, может ли предмет быть поднят с земли/карты.
@@ -22,7 +46,7 @@ export function canItemBePickedUp(
   const ownership = world.getComponent(itemId, 'ownership');
   if (ownership) return { valid: false, reason: 'Предмет уже кому-то принадлежит' };
 
-  if (findActiveBrain(world, itemId)) {
+  if (hasActiveBrainOrLiving(world, itemId)) {
     return { valid: false, reason: 'Нельзя подобрать существо с активным мозгом' };
   }
 
@@ -41,7 +65,7 @@ export function canItemBeHeldInSlot(
   const item = world.getComponent(itemId, 'item');
   if (!item) return { valid: false, reason: 'Сущность не является предметом' };
 
-  if (findActiveBrain(world, itemId)) {
+  if (hasActiveBrainOrLiving(world, itemId)) {
     return { valid: false, reason: 'Нельзя удерживать существо с активным мозгом' };
   }
 
@@ -70,7 +94,7 @@ export function canItemBeEquippedToArea(
   const item = world.getComponent(itemId, 'item');
   if (!item) return { valid: false, reason: 'Сущность не является предметом' };
 
-  if (findActiveBrain(world, itemId)) {
+  if (hasActiveBrainOrLiving(world, itemId)) {
     return { valid: false, reason: 'Нельзя экипировать существо с активным мозгом' };
   }
 
@@ -114,7 +138,7 @@ export function canItemBeStoredInInventory(
   const item = world.getComponent(itemId, 'item');
   if (!item) return { valid: false, reason: 'Сущность не является предметом' };
 
-  if (findActiveBrain(world, itemId)) {
+  if (hasActiveBrainOrLiving(world, itemId)) {
     return { valid: false, reason: 'Нельзя поместить существо с активным мозгом в инвентарь' };
   }
 

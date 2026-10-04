@@ -145,9 +145,15 @@ export class WaterSystem {
     const dynamicEntities = world.getEntitiesWith('transform', 'physicsBody', 'physicsStats');
 
     for (const [id, { transform, physicsBody, physicsStats }] of dynamicEntities) {
-      if (!physicsBody.rawBody || physicsBody.bodyType !== 'dynamic') continue;
+      if (
+        physicsBody.bodyHandle === undefined ||
+        physicsBody.bodyType !== 'dynamic' ||
+        !_physics?.driver
+      )
+        continue;
 
-      const rawBody = physicsBody.rawBody;
+      const bodyHandle = physicsBody.bodyHandle;
+      const driver = _physics.driver;
 
       let inWaterData: {
         waterSurfaceY: number;
@@ -211,15 +217,15 @@ export class WaterSystem {
         const submergedRatio = Math.min(1.0, submergedDepth / Math.max(0.08, r * 1.5));
 
         const buoyancyForce = displacedWaterMass * 9.81 * submergedRatio;
-        rawBody.applyImpulse({ x: 0, y: buoyancyForce * dt, z: 0 }, true);
+        driver.applyBodyImpulse(bodyHandle, { x: 0, y: buoyancyForce * dt, z: 0 }, true);
 
         const waterDamping = Math.max(1.8, viscosity);
-        rawBody.setLinearDamping(waterDamping);
-        rawBody.setAngularDamping(waterDamping);
+        driver.setBodyDamping(bodyHandle, waterDamping, waterDamping);
 
         if (waterType === 'river' && flowSpeed > 0 && submergedRatio > 0.05) {
           const flowImpulse = mass * flowSpeed * 2.2 * submergedRatio * dt;
-          rawBody.applyImpulse(
+          driver.applyBodyImpulse(
+            bodyHandle,
             {
               x: flowDirection.x * flowImpulse,
               y: 0,
@@ -229,16 +235,15 @@ export class WaterSystem {
           );
         }
 
-        if (rawBody.isSleeping()) {
-          rawBody.wakeUp();
+        if (driver.isBodySleeping(bodyHandle)) {
+          driver.wakeUpBody(bodyHandle);
         }
       } else {
         const defaultLinDamping =
           physicsStats.linearDamping ?? (physicsStats.shape === 'ball' ? 0.25 : 1);
         const defaultAngDamping =
           physicsStats.angularDamping ?? (physicsStats.shape === 'ball' ? 2.0 : 1);
-        rawBody.setLinearDamping(defaultLinDamping);
-        rawBody.setAngularDamping(defaultAngDamping);
+        driver.setBodyDamping(bodyHandle, defaultLinDamping, defaultAngDamping);
       }
     }
   }

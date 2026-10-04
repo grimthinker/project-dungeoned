@@ -172,7 +172,7 @@ export class AttackSystem {
         tag?.archetype === 'creature';
 
       if (hasAnatomy) {
-        applyWeaponDamageToCreature(world, physics, targetId, rawDamage);
+        applyWeaponDamageToCreature(world, targetId, rawDamage);
       } else {
         // Учет брони для обычных предметов/препятствий
         let defense = 0;

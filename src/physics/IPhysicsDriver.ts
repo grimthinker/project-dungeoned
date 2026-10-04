@@ -1,5 +1,7 @@
-import RAPIER from '@dimforge/rapier3d-compat';
-import { Vec3 } from '../types';
+import { Vec3, Quat } from '../types';
+
+export type PhysicsBodyHandle = number;
+export type PhysicsColliderHandle = number;
 
 export interface PhysicsDriverStats {
   stepCount: number;
@@ -18,8 +20,32 @@ export interface PhysicalRaycastResult {
   entityId?: string;
   /** Признак попадания в статический пол мира */
   isGround: boolean;
-  /** Пораженный коллайдер Rapier */
-  collider?: RAPIER.Collider;
+  /** Пораженный коллайдер (через числовой хэндл) */
+  colliderHandle?: PhysicsColliderHandle;
+}
+
+export interface BodyCreationOptions {
+  rotation?: Quat;
+  linearDamping?: number;
+  angularDamping?: number;
+  gravityScale?: number;
+}
+
+export interface ColliderCreationOptions {
+  mass?: number;
+  offset?: Vec3;
+  restitution?: number;
+  friction?: number;
+  isSensor?: boolean;
+  useMaxCombineRule?: boolean;
+}
+
+export interface DynamicBodyState {
+  translation: Vec3;
+  rotation: Quat;
+  linvel: Vec3;
+  angvel: Vec3;
+  isSleeping: boolean;
 }
 
 export interface IPhysicsDriver {
@@ -35,72 +61,86 @@ export interface IPhysicsDriver {
   /** Устанавливает 3D-вектор гравитации в метрах на секунду в квадрате */
   setGravity(x: number, y: number, z: number): void;
 
-  /** Создает твердое тело в физическом мире с опциональной привязкой к EntityId */
-  createRigidBody(desc: RAPIER.RigidBodyDesc, entityId?: string): RAPIER.RigidBody;
+  // --- СОЗДАНИЕ ТЕЛ ---
+  createDynamicBody(pos: Vec3, entityId?: string, options?: BodyCreationOptions): PhysicsBodyHandle;
+  createFixedBody(pos: Vec3, entityId?: string, options?: BodyCreationOptions): PhysicsBodyHandle;
+  createKinematicPositionBody(
+    pos: Vec3,
+    entityId?: string,
+    options?: BodyCreationOptions
+  ): PhysicsBodyHandle;
 
-  /** Создает коллайдер геометрической формы и прикрепляет его к твердому телу */
-  createCollider(desc: RAPIER.ColliderDesc, parent: RAPIER.RigidBody): RAPIER.Collider;
-
-  /** Удаляет отдельный коллайдер из физического мира */
-  removeCollider(collider: RAPIER.Collider, wakeUp?: boolean): void;
-
-  /** Удаляет твердое тело и все прикрепленные к нему коллайдеры из физического мира */
-  removeRigidBody(body: RAPIER.RigidBody): void;
-
-  /** Создает динамическое тело с позицией (падающее под силой тяжести) */
-  createDynamicBody(pos: Vec3, entityId?: string): RAPIER.RigidBody;
-
-  /** Создает фиксированное неподвижное тело (препятствия, стены) */
-  createFixedBody(pos: Vec3, entityId?: string): RAPIER.RigidBody;
-
-  /** Создает кинематическое тело (для существ, управляемых напрямую кодом) */
-  createKinematicPositionBody(pos: Vec3, entityId?: string): RAPIER.RigidBody;
-
-  /** Создает сферический коллайдер */
-  createBallCollider(radius: number, parent: RAPIER.RigidBody, mass?: number): RAPIER.Collider;
-
-  /** Создает вертикальный цилиндрический коллайдер */
+  // --- СОЗДАНИЕ КОЛЛАЙДЕРОВ ---
+  createBallCollider(
+    radius: number,
+    parentHandle: PhysicsBodyHandle,
+    options?: ColliderCreationOptions
+  ): PhysicsColliderHandle;
   createCylinderCollider(
     halfHeight: number,
     radius: number,
-    parent: RAPIER.RigidBody,
-    mass?: number,
-    offset?: Vec3
-  ): RAPIER.Collider;
-
-  /** Создает выпуклый многогранник (Convex Hull) из массива 3D точек */
+    parentHandle: PhysicsBodyHandle,
+    options?: ColliderCreationOptions
+  ): PhysicsColliderHandle;
   createConvexHullCollider(
     points: Float32Array,
-    parent: RAPIER.RigidBody,
-    mass?: number
-  ): RAPIER.Collider | null;
-
-  /** Создает вертикальный капсульный коллайдер с опциональным вертикальным смещением */
+    parentHandle: PhysicsBodyHandle,
+    options?: ColliderCreationOptions
+  ): PhysicsColliderHandle | null;
   createCapsuleCollider(
     halfHeight: number,
     radius: number,
-    parent: RAPIER.RigidBody,
-    mass?: number,
-    offsetY?: number
-  ): RAPIER.Collider;
+    parentHandle: PhysicsBodyHandle,
+    options?: ColliderCreationOptions
+  ): PhysicsColliderHandle;
+  createCuboidCollider(
+    hx: number,
+    hy: number,
+    hz: number,
+    parentHandle: PhysicsBodyHandle,
+    options?: ColliderCreationOptions
+  ): PhysicsColliderHandle;
 
-  /** Обновляет размеры и относительное смещение капсульного коллайдера */
+  // --- ОБНОВЛЕНИЕ И УДАЛЕНИЕ ---
   updateCapsuleCollider(
-    collider: RAPIER.Collider,
+    colliderHandle: PhysicsColliderHandle,
     halfHeight: number,
     radius: number,
     offsetY: number
-  ): RAPIER.Collider;
+  ): PhysicsColliderHandle;
+  updateCuboidCollider(
+    colliderHandle: PhysicsColliderHandle,
+    hx: number,
+    hy: number,
+    hz: number,
+    offsetY?: number
+  ): PhysicsColliderHandle;
+  removeCollider(colliderHandle: PhysicsColliderHandle, wakeUp?: boolean): void;
+  removeRigidBody(bodyHandle: PhysicsBodyHandle): void;
 
-  /** Вычисляет разрешенное движение кинематического персонажа через KCC с учетом препятствий и гравитации */
+  // --- УПРАВЛЕНИЕ СОСТОЯНИЕМ ТЕЛ (Трансформации и силы) ---
+  setBodyTranslation(handle: PhysicsBodyHandle, pos: Vec3, wakeUp?: boolean): void;
+  setBodyRotation(handle: PhysicsBodyHandle, rot: Quat, wakeUp?: boolean): void;
+  setNextKinematicTranslation(handle: PhysicsBodyHandle, pos: Vec3): void;
+  setNextKinematicRotation(handle: PhysicsBodyHandle, rot: Quat): void;
+
+  setBodyLinearVelocity(handle: PhysicsBodyHandle, vel: Vec3, wakeUp?: boolean): void;
+  setBodyAngularVelocity(handle: PhysicsBodyHandle, angvel: Vec3, wakeUp?: boolean): void;
+  applyBodyImpulse(handle: PhysicsBodyHandle, impulse: Vec3, wakeUp?: boolean): void;
+  setBodyDamping(handle: PhysicsBodyHandle, linear: number, angular: number): void;
+  setBodyGravityScale(handle: PhysicsBodyHandle, scale: number, wakeUp?: boolean): void;
+
+  isBodySleeping(handle: PhysicsBodyHandle): boolean;
+  wakeUpBody(handle: PhysicsBodyHandle): void;
+  getBodyState(handle: PhysicsBodyHandle): DynamicBodyState | null;
+
+  // --- СПЕЦИФИЧЕСКИЕ МЕТОДЫ И ЗАПРОСЫ ---
   computeCharacterMovement(
-    collider: RAPIER.Collider,
+    colliderHandle: PhysicsColliderHandle,
     desiredTranslation: Vec3,
     characterMass: number,
     isAirborne?: boolean
   ): { movement: Vec3; isGrounded: boolean; groundNormal?: Vec3; slopeAngleDeg?: number };
-
-  /** Проверяет наличие свободного пространства над головой для подъема из приседа/лежа */
   checkCeilingClearance(
     pos: Vec3,
     radius: number,
@@ -109,33 +149,11 @@ export interface IPhysicsDriver {
     ignoreEntityId?: string
   ): boolean;
 
-  /** Создает коллайдер-кубоид (hx, hy, hz — половины размеров по осям) с опциональным смещением центра */
-  createCuboidCollider(
-    hx: number,
-    hy: number,
-    hz: number,
-    parent: RAPIER.RigidBody,
-    mass?: number,
-    offset?: Vec3 | number
-  ): RAPIER.Collider;
-
-  /** Обновляет форму и вертикальное смещение коллайдера-кубоида */
-  updateCuboidCollider(
-    collider: RAPIER.Collider,
-    hx: number,
-    hy: number,
-    hz: number,
-    offsetY?: number
-  ): RAPIER.Collider;
-
-  /** Создает статический пол (кубоид), верхняя грань которого находится на высоте y */
   createGround(
     size?: number,
     thickness?: number,
     y?: number
-  ): { body: RAPIER.RigidBody; collider: RAPIER.Collider };
-
-  /** Создает или обновляет отдельный чанк физического ландшафта (TriMesh) */
+  ): { bodyHandle: PhysicsBodyHandle; colliderHandle: PhysicsColliderHandle };
   createOrUpdateTerrainChunk(
     chunkId: string,
     vertices: Float32Array,
@@ -143,36 +161,24 @@ export interface IPhysicsDriver {
     position: Vec3,
     entityId?: string
   ): void;
-
-  /** Удаляет физический чанк ландшафта из мира */
   removeTerrainChunk(chunkId: string): void;
+  wakeUpDynamicBodiesInRadius(center: Vec3, radius: number): void;
 
-  /** Запрашивает все сущности в радиусе (сферическое перекрытие в 3D) */
   queryEntitiesInSphere(center: Vec3, radius: number): string[];
-
-  /** Запрашивает все сущности внутри параллелепипеда (ориентированного бокса) */
-  queryEntitiesInBox(center: Vec3, halfExtents: Vec3, rotation?: import('../types').Quat): string[];
-
-  /** Запрашивает все сущности внутри вертикального цилиндра */
+  queryEntitiesInBox(center: Vec3, halfExtents: Vec3, rotation?: Quat): string[];
   queryEntitiesInCylinder(
     center: Vec3,
     halfHeight: number,
     radius: number,
-    rotation?: import('../types').Quat
+    rotation?: Quat
   ): string[];
-
-  /** Универсальный пространственный запрос сущностей в заданной форме зоны */
   queryEntitiesInZoneShape(
     shapeType: 'sphere' | 'cylinder' | 'box',
     center: Vec3,
     dimensions: { radius: number; height: number; width: number; depth: number },
-    rotation?: import('../types').Quat
+    rotation?: Quat
   ): string[];
 
-  /** Принудительно будит спящие динамические тела в заданном радиусе (например, при взрыве или разрушении опоры) */
-  wakeUpDynamicBodiesInRadius(center: Vec3, radius: number): void;
-
-  /** Пускает луч и возвращает отсортированный по дальности список всех попаданий */
   castRayMultiple(
     start: Vec3,
     direction: Vec3,
@@ -180,8 +186,6 @@ export interface IPhysicsDriver {
     solid: boolean,
     ignoreEntityId?: string
   ): Array<{ entityId: string; toi: number }>;
-
-  /** Физический рейкаст поверхности для точного определения 3D точки на коллайдерах */
   castRay(
     start: Vec3,
     direction: Vec3,
@@ -190,21 +194,11 @@ export interface IPhysicsDriver {
     filterExcludeEntityId?: string
   ): PhysicalRaycastResult | null;
 
-  /** Принудительно обновляет структуры ускорения пространственных запросов (BroadPhase) */
   updateSceneQueries(): void;
+  getEntityIdByBodyHandle(handle: PhysicsBodyHandle): string | undefined;
 
-  /** Возвращает EntityId, привязанный к указанному телу */
-  getEntityIdByBody(body: RAPIER.RigidBody): string | undefined;
-
-  /** Возвращает твердое тело по EntityId */
-  getBodyByEntityId(entityId: string): RAPIER.RigidBody | undefined;
-
-  /** Возвращает ссылку на нативный инстанс мира (для низкоуровневых операций) */
+  /** Возвращает нативный мир ТОЛЬКО для дебаг-рендера (остальным системам недоступен) */
   getRawWorld(): any;
-
-  /** Возвращает базовую статистику мира */
   getStats(): PhysicsDriverStats;
-
-  /** Очищает и освобождает всю память WebAssembly мира Rapier */
   destroy(): void;
 }

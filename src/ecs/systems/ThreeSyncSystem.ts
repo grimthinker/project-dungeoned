@@ -1149,7 +1149,7 @@ export class ThreeSyncSystem {
     const items = world.getEntitiesWith('transform', 'physicsBody', 'physicsStats');
     for (const [itId, { transform, physicsBody, physicsStats }] of items) {
       if (world.getComponent(itId, 'ownership')) continue;
-      if (!physicsBody.rawBody || physicsBody.bodyType !== 'dynamic') continue;
+      if (physicsBody.bodyHandle === undefined || physicsBody.bodyType !== 'dynamic') continue;
 
       const dx = transform.x - waterTransform.x;
       const dz = transform.z - waterTransform.z;
@@ -1170,7 +1170,10 @@ export class ThreeSyncSystem {
           continue;
         }
 
-        const linvel = physicsBody.rawBody.linvel();
+        const bodyState = this.physicsDriver?.getBodyState(physicsBody.bodyHandle);
+        if (!bodyState || bodyState.isSleeping) continue;
+
+        const linvel = bodyState.linvel;
         const speed = Math.hypot(linvel.x, linvel.y, linvel.z);
 
         if (speed > 0.08) {

@@ -1,6 +1,15 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import { IPhysicsDriver, PhysicsDriverStats, PhysicalRaycastResult } from './IPhysicsDriver';
-import { Vec3 } from '../types';
+import {
+  IPhysicsDriver,
+  PhysicsDriverStats,
+  PhysicalRaycastResult,
+  PhysicsBodyHandle,
+  PhysicsColliderHandle,
+  BodyCreationOptions,
+  ColliderCreationOptions,
+  DynamicBodyState,
+} from './IPhysicsDriver';
+import { Vec3, Quat } from '../types';
 
 export class RapierPhysicsDriver implements IPhysicsDriver {
   private world: RAPIER.World | null = null;
@@ -9,19 +18,19 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
   public fixedTimestep: number = 1 / 60;
   private isBroadPhaseDirty: boolean = true;
 
-  // Маппинг связей дескрипторов тел и сущностей ECS
-  private bodyHandleToEntityMap: Map<number, string> = new Map();
-  private entityToBodyMap: Map<string, RAPIER.RigidBody> = new Map();
+  // Изолированные реестры WASM-объектов
+  private bodies = new Map<PhysicsBodyHandle, RAPIER.RigidBody>();
+  private colliders = new Map<PhysicsColliderHandle, RAPIER.Collider>();
+  private bodyHandleToEntityMap = new Map<PhysicsBodyHandle, string>();
+  private entityToBodyMap = new Map<string, PhysicsBodyHandle>();
 
-  // Ссылка на статическое тело пола
-  private groundBody: RAPIER.RigidBody | null = null;
-  private groundCollider: RAPIER.Collider | null = null;
+  private groundBodyHandle: PhysicsBodyHandle | null = null;
+  private groundColliderHandle: PhysicsColliderHandle | null = null;
 
-  // Кэш физических чанков террейна
-  private terrainChunks: Map<string, { body: RAPIER.RigidBody; collider: RAPIER.Collider }> =
-    new Map();
-
-  // Переиспользуемый инстанс KCC
+  private terrainChunks = new Map<
+    string,
+    { bodyHandle: PhysicsBodyHandle; colliderHandle: PhysicsColliderHandle }
+  >();
   private characterController: RAPIER.KinematicCharacterController | null = null;
 
   constructor() {
@@ -30,14 +39,13 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     this.world.integrationParameters.dt = this.fixedTimestep;
     this.eventQueue = new RAPIER.EventQueue(true);
 
-    // Инициализация KCC контроллера с автоподъемом на ступени и мягким скольжением
-    const offset = 0.02; // отступ 2 см для исключения залипания
+    const offset = 0.02;
     this.characterController = this.world.createCharacterController(offset);
-    this.characterController.enableAutostep(0.15, 0.25, false); // преодоление ступеней и кочек до 15 см
-    this.characterController.enableSnapToGround(0.35); // прилипание к земле на спусках холмов до 35 см
-    this.characterController.setMaxSlopeClimbAngle((40 * Math.PI) / 180); // свободный подъем на склоны до 40 градусов
-    this.characterController.setMinSlopeSlideAngle((40 * Math.PI) / 180); // соскальзывание со склонов круче 40 градусов
-    this.characterController.setApplyImpulsesToDynamicBodies(true); // передача импульса ящикам и предметам
+    this.characterController.enableAutostep(0.15, 0.25, false);
+    this.characterController.enableSnapToGround(0.35);
+    this.characterController.setMaxSlopeClimbAngle((40 * Math.PI) / 180);
+    this.characterController.setMinSlopeSlideAngle((40 * Math.PI) / 180);
+    this.characterController.setApplyImpulsesToDynamicBodies(true);
     this.characterController.setSlideEnabled(true);
 
     console.log(
@@ -51,7 +59,6 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
 
   public step(dt?: number): void {
     if (!this.world) return;
-
     if (dt !== undefined && dt > 0) {
       this.world.integrationParameters.dt = dt;
     }
@@ -65,133 +72,161 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     this.world.gravity = new RAPIER.Vector3(x, y, z);
   }
 
-  public createRigidBody(desc: RAPIER.RigidBodyDesc, entityId?: string): RAPIER.RigidBody {
-    if (!this.world) {
-      throw new Error(
-        '[RapierPhysicsDriver] Невозможно создать тело: мир Rapier не инициализирован.'
-      );
+  // --- ВНУТРЕННИЕ ПОМОЩНИКИ ДЛЯ РАБОТЫ С ОПЦИЯМИ ---
+
+  private applyBodyOptions(desc: RAPIER.RigidBodyDesc, options?: BodyCreationOptions) {
+    if (!options) return;
+    if (options.rotation) desc.setRotation(options.rotation);
+    if (options.linearDamping !== undefined) desc.setLinearDamping(options.linearDamping);
+    if (options.angularDamping !== undefined) desc.setAngularDamping(options.angularDamping);
+    if (options.gravityScale !== undefined) desc.setGravityScale(options.gravityScale);
+  }
+
+  private applyColliderOptions(desc: RAPIER.ColliderDesc, options?: ColliderCreationOptions) {
+    if (!options) return;
+    if (options.mass !== undefined) desc.setMass(options.mass);
+    if (options.offset) desc.setTranslation(options.offset.x, options.offset.y, options.offset.z);
+    if (options.restitution !== undefined) desc.setRestitution(options.restitution);
+    if (options.friction !== undefined) desc.setFriction(options.friction);
+    if (options.isSensor) desc.setSensor(true);
+    if (options.useMaxCombineRule) {
+      desc.setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Max);
+      desc.setFrictionCombineRule(RAPIER.CoefficientCombineRule.Max);
     }
+  }
+
+  private registerBody(desc: RAPIER.RigidBodyDesc, entityId?: string): PhysicsBodyHandle {
+    if (!this.world) throw new Error('[RapierPhysicsDriver] World not initialized');
     const body = this.world.createRigidBody(desc);
+    this.bodies.set(body.handle, body);
     if (entityId) {
       this.bodyHandleToEntityMap.set(body.handle, entityId);
-      this.entityToBodyMap.set(entityId, body);
+      this.entityToBodyMap.set(entityId, body.handle);
       (body as any).userData = { entityId };
     }
     this.isBroadPhaseDirty = true;
-    return body;
+    return body.handle;
   }
 
-  public createCollider(desc: RAPIER.ColliderDesc, parent: RAPIER.RigidBody): RAPIER.Collider {
-    if (!this.world) {
-      throw new Error(
-        '[RapierPhysicsDriver] Невозможно создать коллайдер: мир Rapier не инициализирован.'
-      );
-    }
-    const collider = this.world.createCollider(desc, parent);
+  private registerCollider(
+    desc: RAPIER.ColliderDesc,
+    parentHandle: PhysicsBodyHandle
+  ): PhysicsColliderHandle {
+    if (!this.world) throw new Error('[RapierPhysicsDriver] World not initialized');
+    const parentBody = this.bodies.get(parentHandle);
+    if (!parentBody) throw new Error('[RapierPhysicsDriver] Parent body not found');
+    const collider = this.world.createCollider(desc, parentBody);
+    this.colliders.set(collider.handle, collider);
     this.isBroadPhaseDirty = true;
-    return collider;
+    return collider.handle;
   }
 
-  public removeCollider(collider: RAPIER.Collider, wakeUp: boolean = true): void {
-    if (!this.world) return;
-    this.world.removeCollider(collider, wakeUp);
-    this.isBroadPhaseDirty = true;
-  }
+  // --- СОЗДАНИЕ ТЕЛ ---
 
-  public removeRigidBody(body: RAPIER.RigidBody): void {
-    if (!this.world) return;
-    const entityId = this.bodyHandleToEntityMap.get(body.handle);
-    if (entityId) {
-      this.entityToBodyMap.delete(entityId);
-      this.bodyHandleToEntityMap.delete(body.handle);
-    }
-    this.world.removeRigidBody(body);
-    this.isBroadPhaseDirty = true;
-  }
-
-  public createDynamicBody(pos: Vec3, entityId?: string): RAPIER.RigidBody {
+  public createDynamicBody(
+    pos: Vec3,
+    entityId?: string,
+    options?: BodyCreationOptions
+  ): PhysicsBodyHandle {
     const desc = RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z);
-    return this.createRigidBody(desc, entityId);
+    this.applyBodyOptions(desc, options);
+    return this.registerBody(desc, entityId);
   }
 
-  public createFixedBody(pos: Vec3, entityId?: string): RAPIER.RigidBody {
+  public createFixedBody(
+    pos: Vec3,
+    entityId?: string,
+    options?: BodyCreationOptions
+  ): PhysicsBodyHandle {
     const desc = RAPIER.RigidBodyDesc.fixed().setTranslation(pos.x, pos.y, pos.z);
-    return this.createRigidBody(desc, entityId);
+    this.applyBodyOptions(desc, options);
+    return this.registerBody(desc, entityId);
   }
 
-  public createKinematicPositionBody(pos: Vec3, entityId?: string): RAPIER.RigidBody {
+  public createKinematicPositionBody(
+    pos: Vec3,
+    entityId?: string,
+    options?: BodyCreationOptions
+  ): PhysicsBodyHandle {
     const desc = RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(pos.x, pos.y, pos.z);
-    return this.createRigidBody(desc, entityId);
+    this.applyBodyOptions(desc, options);
+    return this.registerBody(desc, entityId);
   }
+
+  // --- СОЗДАНИЕ КОЛЛАЙДЕРОВ ---
 
   public createBallCollider(
     radius: number,
-    parent: RAPIER.RigidBody,
-    mass?: number
-  ): RAPIER.Collider {
+    parentHandle: PhysicsBodyHandle,
+    options?: ColliderCreationOptions
+  ): PhysicsColliderHandle {
     const desc = RAPIER.ColliderDesc.ball(Math.max(0.01, radius));
-    if (mass !== undefined && mass > 0) {
-      desc.setMass(mass);
-    }
-    return this.createCollider(desc, parent);
+    this.applyColliderOptions(desc, options);
+    return this.registerCollider(desc, parentHandle);
   }
 
   public createCylinderCollider(
     halfHeight: number,
     radius: number,
-    parent: RAPIER.RigidBody,
-    mass?: number,
-    offset?: Vec3
-  ): RAPIER.Collider {
+    parentHandle: PhysicsBodyHandle,
+    options?: ColliderCreationOptions
+  ): PhysicsColliderHandle {
     const desc = RAPIER.ColliderDesc.cylinder(Math.max(0.01, halfHeight), Math.max(0.01, radius));
-    if (offset) {
-      desc.setTranslation(offset.x, offset.y, offset.z);
-    }
-    if (mass !== undefined && mass > 0) {
-      desc.setMass(mass);
-    }
-    return this.createCollider(desc, parent);
+    this.applyColliderOptions(desc, options);
+    return this.registerCollider(desc, parentHandle);
   }
 
   public createConvexHullCollider(
     points: Float32Array,
-    parent: RAPIER.RigidBody,
-    mass?: number
-  ): RAPIER.Collider | null {
+    parentHandle: PhysicsBodyHandle,
+    options?: ColliderCreationOptions
+  ): PhysicsColliderHandle | null {
     const desc = RAPIER.ColliderDesc.convexHull(points);
     if (!desc) return null;
-    if (mass !== undefined && mass > 0) {
-      desc.setMass(mass);
-    }
-    return this.createCollider(desc, parent);
+    this.applyColliderOptions(desc, options);
+    return this.registerCollider(desc, parentHandle);
   }
 
   public createCapsuleCollider(
     halfHeight: number,
     radius: number,
-    parent: RAPIER.RigidBody,
-    mass?: number,
-    offsetY?: number
-  ): RAPIER.Collider {
+    parentHandle: PhysicsBodyHandle,
+    options?: ColliderCreationOptions
+  ): PhysicsColliderHandle {
     const desc = RAPIER.ColliderDesc.capsule(Math.max(0.01, halfHeight), Math.max(0.01, radius));
-    if (offsetY !== undefined && offsetY !== 0) {
-      desc.setTranslation(0.0, offsetY, 0.0);
-    }
-    if (mass !== undefined && mass > 0) {
-      desc.setMass(mass);
-    }
-    return this.createCollider(desc, parent);
+    this.applyColliderOptions(desc, options);
+    return this.registerCollider(desc, parentHandle);
   }
 
+  public createCuboidCollider(
+    hx: number,
+    hy: number,
+    hz: number,
+    parentHandle: PhysicsBodyHandle,
+    options?: ColliderCreationOptions
+  ): PhysicsColliderHandle {
+    const desc = RAPIER.ColliderDesc.cuboid(
+      Math.max(0.01, hx),
+      Math.max(0.01, hy),
+      Math.max(0.01, hz)
+    );
+    this.applyColliderOptions(desc, options);
+    return this.registerCollider(desc, parentHandle);
+  }
+
+  // --- ОБНОВЛЕНИЕ И УДАЛЕНИЕ ---
+
   public updateCapsuleCollider(
-    collider: RAPIER.Collider,
+    colliderHandle: PhysicsColliderHandle,
     halfHeight: number,
     radius: number,
     offsetY: number
-  ): RAPIER.Collider {
-    if (!this.world) return collider;
+  ): PhysicsColliderHandle {
+    if (!this.world) return colliderHandle;
+    const collider = this.colliders.get(colliderHandle);
+    if (!collider) return colliderHandle;
     const parentBody = collider.parent();
-    if (!parentBody) return collider;
+    if (!parentBody) return colliderHandle;
 
     const isSensor = collider.isSensor();
     const friction = collider.friction();
@@ -200,6 +235,7 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     const solverGroups = collider.solverGroups();
 
     this.world.removeCollider(collider, false);
+    this.colliders.delete(colliderHandle);
 
     const desc = RAPIER.ColliderDesc.capsule(Math.max(0.01, halfHeight), Math.max(0.01, radius));
     desc.setTranslation(0.0, offsetY, 0.0);
@@ -210,17 +246,153 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     desc.setSolverGroups(solverGroups);
 
     const newCollider = this.world.createCollider(desc, parentBody);
+    this.colliders.set(newCollider.handle, newCollider);
     this.isBroadPhaseDirty = true;
-    return newCollider;
+    return newCollider.handle;
   }
 
+  public updateCuboidCollider(
+    colliderHandle: PhysicsColliderHandle,
+    hx: number,
+    hy: number,
+    hz: number,
+    offsetY?: number
+  ): PhysicsColliderHandle {
+    if (!this.world) return colliderHandle;
+    const collider = this.colliders.get(colliderHandle);
+    if (!collider) return colliderHandle;
+    const parentBody = collider.parent();
+    if (!parentBody) return colliderHandle;
+
+    const isSensor = collider.isSensor();
+    const friction = collider.friction();
+    const restitution = collider.restitution();
+    const collisionGroups = collider.collisionGroups();
+    const solverGroups = collider.solverGroups();
+
+    this.world.removeCollider(collider, false);
+    this.colliders.delete(colliderHandle);
+
+    const desc = RAPIER.ColliderDesc.cuboid(
+      Math.max(0.01, hx),
+      Math.max(0.01, hy),
+      Math.max(0.01, hz)
+    );
+    if (offsetY !== undefined) desc.setTranslation(0.0, offsetY, 0.0);
+    desc.setSensor(isSensor);
+    desc.setFriction(friction);
+    desc.setRestitution(restitution);
+    desc.setCollisionGroups(collisionGroups);
+    desc.setSolverGroups(solverGroups);
+
+    const newCollider = this.world.createCollider(desc, parentBody);
+    this.colliders.set(newCollider.handle, newCollider);
+    this.isBroadPhaseDirty = true;
+    return newCollider.handle;
+  }
+
+  public removeCollider(colliderHandle: PhysicsColliderHandle, wakeUp: boolean = true): void {
+    if (!this.world) return;
+    const collider = this.colliders.get(colliderHandle);
+    if (collider) {
+      this.world.removeCollider(collider, wakeUp);
+      this.colliders.delete(colliderHandle);
+      this.isBroadPhaseDirty = true;
+    }
+  }
+
+  public removeRigidBody(bodyHandle: PhysicsBodyHandle): void {
+    if (!this.world) return;
+    const body = this.bodies.get(bodyHandle);
+    if (body) {
+      const entityId = this.bodyHandleToEntityMap.get(bodyHandle);
+      if (entityId) {
+        this.entityToBodyMap.delete(entityId);
+      }
+      this.bodyHandleToEntityMap.delete(bodyHandle);
+
+      // Очистка привязанных коллайдеров из кэша
+      for (let i = 0; i < body.numColliders(); i++) {
+        const col = body.collider(i);
+        if (col) this.colliders.delete(col.handle);
+      }
+
+      this.world.removeRigidBody(body);
+      this.bodies.delete(bodyHandle);
+      this.isBroadPhaseDirty = true;
+    }
+  }
+
+  // --- УПРАВЛЕНИЕ СОСТОЯНИЕМ ТЕЛ ---
+
+  public setBodyTranslation(handle: PhysicsBodyHandle, pos: Vec3, wakeUp: boolean = true): void {
+    this.bodies.get(handle)?.setTranslation(pos, wakeUp);
+  }
+  public setBodyRotation(handle: PhysicsBodyHandle, rot: Quat, wakeUp: boolean = true): void {
+    this.bodies.get(handle)?.setRotation(rot, wakeUp);
+  }
+  public setNextKinematicTranslation(handle: PhysicsBodyHandle, pos: Vec3): void {
+    this.bodies.get(handle)?.setNextKinematicTranslation(pos);
+  }
+  public setNextKinematicRotation(handle: PhysicsBodyHandle, rot: Quat): void {
+    this.bodies.get(handle)?.setNextKinematicRotation(rot);
+  }
+  public setBodyLinearVelocity(handle: PhysicsBodyHandle, vel: Vec3, wakeUp: boolean = true): void {
+    this.bodies.get(handle)?.setLinvel(vel, wakeUp);
+  }
+  public setBodyAngularVelocity(
+    handle: PhysicsBodyHandle,
+    angvel: Vec3,
+    wakeUp: boolean = true
+  ): void {
+    this.bodies.get(handle)?.setAngvel(angvel, wakeUp);
+  }
+  public applyBodyImpulse(handle: PhysicsBodyHandle, impulse: Vec3, wakeUp: boolean = true): void {
+    this.bodies.get(handle)?.applyImpulse(impulse, wakeUp);
+  }
+  public setBodyDamping(handle: PhysicsBodyHandle, linear: number, angular: number): void {
+    const body = this.bodies.get(handle);
+    if (body) {
+      body.setLinearDamping(linear);
+      body.setAngularDamping(angular);
+    }
+  }
+  public setBodyGravityScale(
+    handle: PhysicsBodyHandle,
+    scale: number,
+    wakeUp: boolean = true
+  ): void {
+    this.bodies.get(handle)?.setGravityScale(scale, wakeUp);
+  }
+  public isBodySleeping(handle: PhysicsBodyHandle): boolean {
+    return this.bodies.get(handle)?.isSleeping() ?? false;
+  }
+  public wakeUpBody(handle: PhysicsBodyHandle): void {
+    this.bodies.get(handle)?.wakeUp();
+  }
+
+  public getBodyState(handle: PhysicsBodyHandle): DynamicBodyState | null {
+    const body = this.bodies.get(handle);
+    if (!body) return null;
+    return {
+      translation: body.translation(),
+      rotation: body.rotation(),
+      linvel: body.linvel(),
+      angvel: body.angvel(),
+      isSleeping: body.isSleeping(),
+    };
+  }
+
+  // --- СПЕЦИФИЧЕСКИЕ МЕТОДЫ ---
+
   public computeCharacterMovement(
-    collider: RAPIER.Collider,
+    colliderHandle: PhysicsColliderHandle,
     desiredTranslation: Vec3,
     characterMass: number,
     isAirborne?: boolean
   ): { movement: Vec3; isGrounded: boolean; groundNormal?: Vec3; slopeAngleDeg?: number } {
-    if (!this.world || !this.characterController) {
+    const collider = this.colliders.get(colliderHandle);
+    if (!this.world || !this.characterController || !collider) {
       return {
         movement: desiredTranslation,
         isGrounded: true,
@@ -230,22 +402,16 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     }
 
     this.characterController.setCharacterMass(characterMass);
-
-    // Во время свободного полета в прыжке отключаем принудительное прилипание к земле (snap-to-ground),
-    // чтобы KCC не затягивал летящую капсулу сквозь крутые наклонные полигоны холма
     if (isAirborne) {
       this.characterController.enableSnapToGround(0.0);
     } else {
       this.characterController.enableSnapToGround(0.35);
     }
 
-    // Исключаем сенсоры и кинематические тела (других существ) для мягкого расталкивания солвером
     const filterFlags =
       RAPIER.QueryFilterFlags.EXCLUDE_SENSORS | RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC;
-
     this.characterController.computeColliderMovement(collider, desiredTranslation, filterFlags);
 
-    // Определение нормали поверхности и пробуждение динамических тел
     let groundNormal: Vec3 = { x: 0, y: 1, z: 0 };
     let maxNormalY = 0;
 
@@ -258,18 +424,13 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
       }
       if (collision && collision.normal1 && collision.normal1.y > maxNormalY) {
         maxNormalY = collision.normal1.y;
-        groundNormal = {
-          x: collision.normal1.x,
-          y: collision.normal1.y,
-          z: collision.normal1.z,
-        };
+        groundNormal = { x: collision.normal1.x, y: collision.normal1.y, z: collision.normal1.z };
       }
     }
 
     const computed = this.characterController.computedMovement();
     const isGrounded = this.characterController.computedGrounded();
 
-    // Страховочный опрос нормали прямо под центром капсулы при контакте с землей
     if (isGrounded && maxNormalY === 0) {
       const colPos = collider.translation();
       const downRay = this.world.castRayAndGetNormal(
@@ -290,7 +451,6 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
       groundNormal.z /= nLen;
     }
 
-    // Угол наклона поверхности от горизонтали в градусах (0° = ровный пол, 90° = отвесная стена)
     const slopeAngleDeg = Math.acos(Math.min(1, Math.max(0, groundNormal.y))) * (180 / Math.PI);
 
     return {
@@ -305,9 +465,12 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     if (!this.world) return;
     const ids = this.queryEntitiesInSphere(center, radius);
     for (const id of ids) {
-      const body = this.getBodyByEntityId(id);
-      if (body && body.isDynamic() && body.isSleeping()) {
-        body.wakeUp();
+      const bodyHandle = this.entityToBodyMap.get(id);
+      if (bodyHandle !== undefined) {
+        const body = this.bodies.get(bodyHandle);
+        if (body && body.isDynamic() && body.isSleeping()) {
+          body.wakeUp();
+        }
       }
     }
   }
@@ -333,13 +496,9 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     this.world.intersectionsWithShape(shapePos, shapeRot, shape, (collider: RAPIER.Collider) => {
       const parent = collider.parent();
       if (parent) {
-        const entityId = this.getEntityIdByBody(parent);
-        if (entityId && entityId === ignoreEntityId) {
-          return true;
-        }
-        if (collider.isSensor()) {
-          return true;
-        }
+        const entityId = this.getEntityIdByBodyHandle(parent.handle);
+        if (entityId && entityId === ignoreEntityId) return true;
+        if (collider.isSensor()) return true;
         if (parent.isFixed() || parent.isDynamic()) {
           isBlocked = true;
           return false;
@@ -351,97 +510,23 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     return isBlocked;
   }
 
-  public createCuboidCollider(
-    hx: number,
-    hy: number,
-    hz: number,
-    parent: RAPIER.RigidBody,
-    mass?: number,
-    offset?: Vec3 | number
-  ): RAPIER.Collider {
-    const desc = RAPIER.ColliderDesc.cuboid(
-      Math.max(0.01, hx),
-      Math.max(0.01, hy),
-      Math.max(0.01, hz)
-    );
-    if (typeof offset === 'number') {
-      desc.setTranslation(0.0, offset, 0.0);
-    } else if (offset && typeof offset === 'object') {
-      desc.setTranslation(offset.x ?? 0, offset.y ?? 0, offset.z ?? 0);
-    }
-    if (mass !== undefined && mass > 0) {
-      desc.setMass(mass);
-    }
-    return this.createCollider(desc, parent);
-  }
-
-  public updateCuboidCollider(
-    collider: RAPIER.Collider,
-    hx: number,
-    hy: number,
-    hz: number,
-    offsetY?: number
-  ): RAPIER.Collider {
-    if (!this.world) return collider;
-    const parentBody = collider.parent();
-    if (!parentBody) return collider;
-
-    const isSensor = collider.isSensor();
-    const friction = collider.friction();
-    const restitution = collider.restitution();
-    const collisionGroups = collider.collisionGroups();
-    const solverGroups = collider.solverGroups();
-
-    this.world.removeCollider(collider, false);
-
-    const desc = RAPIER.ColliderDesc.cuboid(
-      Math.max(0.01, hx),
-      Math.max(0.01, hy),
-      Math.max(0.01, hz)
-    );
-    if (offsetY !== undefined) {
-      desc.setTranslation(0.0, offsetY, 0.0);
-    }
-    desc.setSensor(isSensor);
-    desc.setFriction(friction);
-    desc.setRestitution(restitution);
-    desc.setCollisionGroups(collisionGroups);
-    desc.setSolverGroups(solverGroups);
-
-    const newCollider = this.world.createCollider(desc, parentBody);
-    this.isBroadPhaseDirty = true;
-    return newCollider;
-  }
-
   public createGround(
     size: number = 100,
     thickness: number = 1.0,
     y: number = 0.0
-  ): { body: RAPIER.RigidBody; collider: RAPIER.Collider } {
-    if (!this.world) {
-      throw new Error('[RapierPhysicsDriver] Невозможно создать пол: мир не инициализирован.');
+  ): { bodyHandle: PhysicsBodyHandle; colliderHandle: PhysicsColliderHandle } {
+    if (this.groundBodyHandle !== null) {
+      this.removeRigidBody(this.groundBodyHandle);
+      this.groundBodyHandle = null;
+      this.groundColliderHandle = null;
     }
 
-    // Если пол уже был создан — удаляем старый
-    if (this.groundBody) {
-      this.world.removeRigidBody(this.groundBody);
-      this.groundBody = null;
-      this.groundCollider = null;
-    }
+    const bodyHandle = this.createFixedBody({ x: 0.0, y: y - thickness / 2, z: 0.0 });
+    const colliderHandle = this.createCuboidCollider(size / 2, thickness / 2, size / 2, bodyHandle);
 
-    // Центр кубоида пола смещен вниз на половину толщины, чтобы верхняя грань была строго на Y
-    const groundBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0.0, y - thickness / 2, 0.0);
-    const body = this.world.createRigidBody(groundBodyDesc);
-
-    // halfExtents для cuboid: половина ширины, высоты и глубины
-    const groundColliderDesc = RAPIER.ColliderDesc.cuboid(size / 2, thickness / 2, size / 2);
-    const collider = this.world.createCollider(groundColliderDesc, body);
-
-    this.groundBody = body;
-    this.groundCollider = collider;
-    this.isBroadPhaseDirty = true;
-
-    return { body, collider };
+    this.groundBodyHandle = bodyHandle;
+    this.groundColliderHandle = colliderHandle;
+    return { bodyHandle, colliderHandle };
   }
 
   public createOrUpdateTerrainChunk(
@@ -455,41 +540,43 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
 
     let existing = this.terrainChunks.get(chunkId);
     if (existing) {
-      this.removeRigidBody(existing.body);
+      this.removeRigidBody(existing.bodyHandle);
     }
 
-    const desc = RAPIER.RigidBodyDesc.fixed().setTranslation(position.x, position.y, position.z);
-    const body = this.createRigidBody(desc, entityId);
+    const bodyHandle = this.createFixedBody(position, entityId);
+    const body = this.bodies.get(bodyHandle);
+    if (!body) return;
 
     try {
       const colDesc = RAPIER.ColliderDesc.trimesh(vertices, indices);
       colDesc.setRestitution(0.0);
       colDesc.setFriction(0.8);
 
-      const collider = this.createCollider(colDesc, body);
-      this.terrainChunks.set(chunkId, { body, collider });
+      const collider = this.world.createCollider(colDesc, body);
+      this.colliders.set(collider.handle, collider);
+      this.terrainChunks.set(chunkId, { bodyHandle, colliderHandle: collider.handle });
       this.isBroadPhaseDirty = true;
     } catch (err) {
       console.error(`[RapierPhysicsDriver] Ошибка создания физики чанка ${chunkId}:`, err);
-      this.removeRigidBody(body);
+      this.removeRigidBody(bodyHandle);
     }
   }
 
   public removeTerrainChunk(chunkId: string): void {
-    if (!this.world) return;
     const existing = this.terrainChunks.get(chunkId);
     if (existing) {
-      this.removeRigidBody(existing.body);
+      this.removeRigidBody(existing.bodyHandle);
       this.terrainChunks.delete(chunkId);
       this.isBroadPhaseDirty = true;
     }
   }
 
+  // --- ЗАПРОСЫ ---
+
   public queryEntitiesInSphere(center: Vec3, radius: number): string[] {
     if (!this.world) return [];
-    if (this.isBroadPhaseDirty) {
-      this.updateSceneQueries();
-    }
+    if (this.isBroadPhaseDirty) this.updateSceneQueries();
+
     const hitIds = new Set<string>();
     const shapePos = new RAPIER.Vector3(center.x, center.y, center.z);
     const shapeRot = { w: 1.0, x: 0.0, y: 0.0, z: 0.0 };
@@ -502,7 +589,7 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
       (collider: RAPIER.Collider) => {
         const parent = collider.parent();
         if (parent) {
-          const entityId = this.getEntityIdByBody(parent);
+          const entityId = this.getEntityIdByBodyHandle(parent.handle);
           if (entityId) hitIds.add(entityId);
         }
         return true;
@@ -516,16 +603,12 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     shapeType: 'sphere' | 'cylinder' | 'box',
     center: Vec3,
     dimensions: { radius: number; height: number; width: number; depth: number },
-    rotation?: import('../types').Quat
+    rotation?: Quat
   ): string[] {
     if (shapeType === 'box') {
       return this.queryEntitiesInBox(
         center,
-        {
-          x: dimensions.width / 2,
-          y: dimensions.height / 2,
-          z: dimensions.depth / 2,
-        },
+        { x: dimensions.width / 2, y: dimensions.height / 2, z: dimensions.depth / 2 },
         rotation
       );
     }
@@ -540,15 +623,10 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     return this.queryEntitiesInSphere(center, dimensions.radius);
   }
 
-  public queryEntitiesInBox(
-    center: Vec3,
-    halfExtents: Vec3,
-    rotation?: import('../types').Quat
-  ): string[] {
+  public queryEntitiesInBox(center: Vec3, halfExtents: Vec3, rotation?: Quat): string[] {
     if (!this.world) return [];
-    if (this.isBroadPhaseDirty) {
-      this.updateSceneQueries();
-    }
+    if (this.isBroadPhaseDirty) this.updateSceneQueries();
+
     const hitIds = new Set<string>();
     const shapePos = new RAPIER.Vector3(center.x, center.y, center.z);
     const shapeRot = rotation ?? { w: 1.0, x: 0.0, y: 0.0, z: 0.0 };
@@ -565,7 +643,7 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
       (collider: RAPIER.Collider) => {
         const parent = collider.parent();
         if (parent) {
-          const entityId = this.getEntityIdByBody(parent);
+          const entityId = this.getEntityIdByBodyHandle(parent.handle);
           if (entityId) hitIds.add(entityId);
         }
         return true;
@@ -579,12 +657,11 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     center: Vec3,
     halfHeight: number,
     radius: number,
-    rotation?: import('../types').Quat
+    rotation?: Quat
   ): string[] {
     if (!this.world) return [];
-    if (this.isBroadPhaseDirty) {
-      this.updateSceneQueries();
-    }
+    if (this.isBroadPhaseDirty) this.updateSceneQueries();
+
     const hitIds = new Set<string>();
     const shapePos = new RAPIER.Vector3(center.x, center.y, center.z);
     const shapeRot = rotation ?? { w: 1.0, x: 0.0, y: 0.0, z: 0.0 };
@@ -597,7 +674,7 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
       (collider: RAPIER.Collider) => {
         const parent = collider.parent();
         if (parent) {
-          const entityId = this.getEntityIdByBody(parent);
+          const entityId = this.getEntityIdByBodyHandle(parent.handle);
           if (entityId) hitIds.add(entityId);
         }
         return true;
@@ -615,10 +692,7 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     ignoreEntityId?: string
   ): Array<{ entityId: string; toi: number }> {
     if (!this.world) return [];
-
-    if (this.isBroadPhaseDirty) {
-      this.updateSceneQueries();
-    }
+    if (this.isBroadPhaseDirty) this.updateSceneQueries();
 
     const hits: Array<{ entityId: string; toi: number }> = [];
     const ray = new RAPIER.Ray(
@@ -634,7 +708,7 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
         const collider = intersect.collider;
         const parent = collider.parent();
         if (parent) {
-          const entityId = this.getEntityIdByBody(parent);
+          const entityId = this.getEntityIdByBodyHandle(parent.handle);
           if (entityId && entityId !== ignoreEntityId) {
             hits.push({ entityId, toi: intersect.timeOfImpact });
           }
@@ -644,8 +718,6 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     );
 
     hits.sort((a, b) => a.toi - b.toi);
-
-    // Оставляем только уникальные entityId (ближайшее пересечение для каждого тела)
     const uniqueHits: Array<{ entityId: string; toi: number }> = [];
     const seen = new Set<string>();
     for (const hit of hits) {
@@ -654,26 +726,7 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
         uniqueHits.push(hit);
       }
     }
-
     return uniqueHits;
-  }
-
-  public updateSceneQueries(): void {
-    if (!this.world) return;
-
-    // 1. Проталкиваем координаты тел в коллайдеры
-    this.world.propagateModifiedBodyPositionsToColliders();
-
-    // 2. Выполняем шаг с нулевым dt, чтобы обновить BroadPhase без движения динамических тел
-    const prevTimestep = this.world.timestep;
-    try {
-      this.world.timestep = 0;
-      this.world.step();
-    } finally {
-      this.world.timestep = prevTimestep;
-    }
-
-    this.isBroadPhaseDirty = false;
   }
 
   public castRay(
@@ -684,10 +737,7 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     filterExcludeEntityId?: string
   ): PhysicalRaycastResult | null {
     if (!this.world) return null;
-
-    if (this.isBroadPhaseDirty) {
-      this.updateSceneQueries();
-    }
+    if (this.isBroadPhaseDirty) this.updateSceneQueries();
 
     const len = Math.hypot(direction.x, direction.y, direction.z);
     if (len === 0) return null;
@@ -700,11 +750,12 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
       new RAPIER.Vector3(dirX, dirY, dirZ)
     );
 
-    const excludeBody = filterExcludeEntityId
-      ? this.getBodyByEntityId(filterExcludeEntityId)
+    const excludeBodyHandle = filterExcludeEntityId
+      ? this.entityToBodyMap.get(filterExcludeEntityId)
       : undefined;
+    const excludeBody =
+      excludeBodyHandle !== undefined ? this.bodies.get(excludeBodyHandle) : undefined;
 
-    // Исключаем сенсоры (зоны-триггеры урона/лечения), опрашиваем только материальные коллайдеры
     const hit = this.world.castRayAndGetNormal(
       ray,
       maxToi,
@@ -722,21 +773,16 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
         y: start.y + dirY * toi,
         z: start.z + dirZ * toi,
       };
-
-      const normal: Vec3 = {
-        x: hit.normal.x,
-        y: hit.normal.y,
-        z: hit.normal.z,
-      };
+      const normal: Vec3 = { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z };
 
       const parentBody = hit.collider.parent();
       const isGround =
-        (this.groundCollider !== null && hit.collider.handle === this.groundCollider.handle) ||
-        (this.groundBody !== null &&
+        (this.groundColliderHandle !== null && hit.collider.handle === this.groundColliderHandle) ||
+        (this.groundBodyHandle !== null &&
           parentBody !== null &&
-          parentBody.handle === this.groundBody.handle);
+          parentBody.handle === this.groundBodyHandle);
 
-      const entityId = parentBody ? this.getEntityIdByBody(parentBody) : undefined;
+      const entityId = parentBody ? this.getEntityIdByBodyHandle(parentBody.handle) : undefined;
 
       return {
         point: hitPoint,
@@ -744,36 +790,39 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
         toi,
         entityId,
         isGround: Boolean(isGround),
-        collider: hit.collider,
+        colliderHandle: hit.collider.handle,
       };
     }
 
-    // Фоллбэк: если луч не пересек ни один коллайдер сцены, пересекаем с горизонтальной плоскостью Y = 0
     if (Math.abs(dirY) > 1e-5) {
       const t = -start.y / dirY;
       if (t > 0 && t <= maxToi) {
         return {
-          point: {
-            x: start.x + dirX * t,
-            y: 0,
-            z: start.z + dirZ * t,
-          },
+          point: { x: start.x + dirX * t, y: 0, z: start.z + dirZ * t },
           normal: { x: 0, y: 1, z: 0 },
           toi: t,
           isGround: true,
         };
       }
     }
-
     return null;
   }
 
-  public getEntityIdByBody(body: RAPIER.RigidBody): string | undefined {
-    return this.bodyHandleToEntityMap.get(body.handle);
+  public updateSceneQueries(): void {
+    if (!this.world) return;
+    this.world.propagateModifiedBodyPositionsToColliders();
+    const prevTimestep = this.world.timestep;
+    try {
+      this.world.timestep = 0;
+      this.world.step();
+    } finally {
+      this.world.timestep = prevTimestep;
+    }
+    this.isBroadPhaseDirty = false;
   }
 
-  public getBodyByEntityId(entityId: string): RAPIER.RigidBody | undefined {
-    return this.entityToBodyMap.get(entityId);
+  public getEntityIdByBodyHandle(handle: PhysicsBodyHandle): string | undefined {
+    return this.bodyHandleToEntityMap.get(handle);
   }
 
   public getRawWorld(): RAPIER.World | null {
@@ -781,9 +830,7 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
   }
 
   public getStats(): PhysicsDriverStats {
-    if (!this.world) {
-      return { stepCount: 0, bodyCount: 0, colliderCount: 0 };
-    }
+    if (!this.world) return { stepCount: 0, bodyCount: 0, colliderCount: 0 };
     return {
       stepCount: this.stepCount,
       bodyCount: this.world.bodies.len(),
@@ -794,8 +841,10 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
   public destroy(): void {
     this.bodyHandleToEntityMap.clear();
     this.entityToBodyMap.clear();
-    this.groundBody = null;
-    this.groundCollider = null;
+    this.bodies.clear();
+    this.colliders.clear();
+    this.groundBodyHandle = null;
+    this.groundColliderHandle = null;
     this.terrainChunks.clear();
 
     if (this.characterController) {
@@ -809,9 +858,6 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     if (this.world) {
       this.world.free();
       this.world = null;
-      console.log(
-        '[RapierPhysicsDriver] Память физического мира Rapier3D (WASM) успешно освобождена.'
-      );
     }
   }
 }

@@ -1,19 +1,13 @@
 import { World } from '../World';
-import { PhysicsSystem } from '../systems/PhysicsSystem';
-import { EntityId, CollisionCategory, COLLISION_MASK_ALL, COLLISION_MASK_NONE } from '../types';
+import { EntityId } from '../types';
 import { getAnatomyParts, getRootOwner, invalidateAnatomyCache } from './hierarchy';
-import { findActiveBrain } from './anatomy';
 import { getPartArmor, getConnectionArmor, selectDamageTarget } from './combat';
 import { DeathService } from '../services/DeathService';
 import { evaluateConsciousness } from './anatomyStatus';
 import { ConsciousnessState } from '../types';
 import { EventBus } from '../../core/EventBus';
 
-export function forceDropItemFromPart(
-  world: World,
-  physics: PhysicsSystem,
-  partId: EntityId
-): void {
+export function forceDropItemFromPart(world: World, partId: EntityId): void {
   const slot = world.getComponent(partId, 'interactionSlots');
   if (!slot || slot.itemId === null) return;
 
@@ -40,14 +34,16 @@ export function forceDropItemFromPart(
     renderable.isVisible = true;
   }
 
-  physics.createDynamicItemBody(world, itemId, { x: dropX, y: dropY + 0.5, z: dropZ });
+  world.addComponent(itemId, 'droppedItemIntent', {
+    position: { x: dropX, y: dropY + 0.5, z: dropZ },
+  });
 }
 
-export function destroyPartRecursive(world: World, physics: PhysicsSystem, partId: EntityId): void {
+export function destroyPartRecursive(world: World, partId: EntityId): void {
   if (!world.getEntity(partId)) return;
 
-  // Выбрасываем предмет из уничтожаемой части тела
-  forceDropItemFromPart(world, physics, partId);
+  // Выбрасываем предмет из уничтожаемой части тела через интент
+  forceDropItemFromPart(world, partId);
 
   // 1. Находим все остальные части в мире и обрываем связи, ведущие к удаляемой части
   const allEntities = world.getAllEntities();
@@ -68,7 +64,6 @@ export function destroyPartRecursive(world: World, physics: PhysicsSystem, partI
 
 export function applyDamageToPart(
   world: World,
-  physics: PhysicsSystem,
   partId: EntityId,
   rawDamage: number,
   visited: Set<string>
@@ -89,7 +84,7 @@ export function applyDamageToPart(
     fp.isFunctional = false;
 
     if (overflow > 0) {
-      resolveOverflowFromPart(world, physics, partId, overflow, visited);
+      resolveOverflowFromPart(world, partId, overflow, visited);
     }
   } else {
     fp.current = nextFp;
@@ -100,7 +95,7 @@ export function applyDamageToPart(
 
   // При полном разрушении руки (ФП <= -max) сбрасываем удерживаемый предмет и прерываем атаку
   if (fp.current <= -fp.max.current) {
-    forceDropItemFromPart(world, physics, partId);
+    forceDropItemFromPart(world, partId);
 
     const rootId = getRootOwner(world, partId) ?? partId;
     const activeAttacks = world.getComponent(rootId, 'activeAttacks');
@@ -112,14 +107,13 @@ export function applyDamageToPart(
 
 function resolveOverflowFromPart(
   world: World,
-  physics: PhysicsSystem,
   partId: EntityId,
   overflow: number,
   visited: Set<string>
 ): void {
   const socketLink = world.getComponent(partId, 'socketLink');
   if (!socketLink || !socketLink.links) {
-    handleDeadEndOverflow(world, physics, partId, overflow);
+    handleDeadEndOverflow(world, partId, overflow);
     return;
   }
 
@@ -147,7 +141,7 @@ function resolveOverflowFromPart(
   }
 
   if (candidates.length === 0) {
-    handleDeadEndOverflow(world, physics, partId, overflow);
+    handleDeadEndOverflow(world, partId, overflow);
     return;
   }
 
@@ -166,7 +160,6 @@ function resolveOverflowFromPart(
   visited.add(chosen.edgeKey);
   applyDamageToConnection(
     world,
-    physics,
     partId,
     chosen.socketId,
     chosen.targetPartId,
@@ -178,7 +171,6 @@ function resolveOverflowFromPart(
 
 export function applyDamageToConnection(
   world: World,
-  physics: PhysicsSystem,
   partA: EntityId,
   socketIdA: string,
   partB: EntityId,
@@ -210,7 +202,7 @@ export function applyDamageToConnection(
       const totalSize = sizeA + sizeB;
       const targetPart = Math.random() * totalSize < sizeA ? partA : partB;
 
-      applyDamageToPart(world, physics, targetPart, overflow, visited);
+      applyDamageToPart(world, targetPart, overflow, visited);
     }
   } else {
     linkA.currentStrength = nextStr;
@@ -219,12 +211,7 @@ export function applyDamageToConnection(
   }
 }
 
-function handleDeadEndOverflow(
-  world: World,
-  physics: PhysicsSystem,
-  partId: EntityId,
-  overflow: number
-): void {
+function handleDeadEndOverflow(world: World, partId: EntityId, overflow: number): void {
   const rootId = getRootOwner(world, partId) ?? partId;
   const isDead = evaluateConsciousness(world, rootId) === ConsciousnessState.DEAD;
 
@@ -234,7 +221,7 @@ function handleDeadEndOverflow(
     if (health) {
       health.current = Math.max(0, health.current - overflow);
       if (health.current <= 0) {
-        destroyPartRecursive(world, physics, partId);
+        destroyPartRecursive(world, partId);
       }
     }
   }
@@ -246,7 +233,6 @@ export function checkCreatureDeath(world: World, rootEntityId: EntityId): void {
 
 export function applyWeaponDamageToCreature(
   world: World,
-  physics: PhysicsSystem,
   creatureRootId: EntityId,
   rawDamage: number
 ): void {
@@ -261,7 +247,7 @@ export function applyWeaponDamageToCreature(
       0,
       rawDamage * (1 - Math.min(0.9, Math.max(0, armor.defense / 100))) - armor.flatReduction
     );
-    applyDamageToPart(world, physics, target.partId, mitigated, visited);
+    applyDamageToPart(world, target.partId, mitigated, visited);
   } else {
     const armor = getConnectionArmor(world, target.partA, target.partB);
     const mitigated = Math.max(
@@ -270,7 +256,6 @@ export function applyWeaponDamageToCreature(
     );
     applyDamageToConnection(
       world,
-      physics,
       target.partA,
       target.socketIdA,
       target.partB,
@@ -285,7 +270,6 @@ export function applyWeaponDamageToCreature(
 
 export function applyZoneDamageToCreature(
   world: World,
-  physics: PhysicsSystem,
   creatureRootId: EntityId,
   damageAmount: number
 ): void {
@@ -293,14 +277,13 @@ export function applyZoneDamageToCreature(
   const visited = new Set<string>();
   // Зоны наносят урон всем частям одновременно, минуя соединения и броню
   for (const partId of parts) {
-    applyDamageToPart(world, physics, partId, damageAmount, visited);
+    applyDamageToPart(world, partId, damageAmount, visited);
   }
   checkCreatureDeath(world, creatureRootId);
 }
 
 export function applyZoneJointDamageToCreature(
   world: World,
-  physics: PhysicsSystem,
   creatureRootId: EntityId,
   damageAmount: number
 ): void {
@@ -321,7 +304,6 @@ export function applyZoneJointDamageToCreature(
 
       applyDamageToConnection(
         world,
-        physics,
         partId,
         socketIdA,
         targetPartId,

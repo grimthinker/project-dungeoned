@@ -212,12 +212,6 @@ export class VelocitySystem {
         w: Math.cos(halfAngle),
       };
 
-      const physBodyComp = world.getComponent(id, 'physicsBody');
-      if (physBodyComp && physBodyComp.rawBody) {
-        // Установка кинематического вращения для тел
-        physBodyComp.rawBody.setRotation(transform.rotation, true);
-      }
-
       // Direction Mode (считается относительно взгляда головы)
       let directionMode: CreatureDirectionMode = 'immobile';
       const prevDirectionMode = meta.directionMode;

@@ -1,4 +1,3 @@
-import RAPIER from '@dimforge/rapier3d-compat';
 import { GameApp } from '../GameApp';
 import {
   EntityComponents,
@@ -8,6 +7,7 @@ import {
   SERIALIZABLE_COMPONENT_KEYS,
   StatValue,
 } from './types';
+import { PhysicsBodyHandle, PhysicsColliderHandle } from '../physics/IPhysicsDriver';
 import { Radians } from '../utils';
 import { evaluateStat, createStat } from './stats/StatEvaluator';
 import { fastClone } from './utils/clone';
@@ -202,8 +202,8 @@ export class WorldSerializer {
       // Удаляем старую сущность, если восстанавливаем поверх (например, при Undo)
       if (this.app.world.getEntity(ent.id)) {
         const phys = this.app.world.getComponent(ent.id, 'physicsBody');
-        if (phys) {
-          if (phys.rawBody) this.app.physicsDriver.removeRigidBody(phys.rawBody);
+        if (phys && phys.bodyHandle !== undefined && this.app.physicsDriver) {
+          this.app.physicsDriver.removeRigidBody(phys.bodyHandle);
         }
         this.app.world.removeEntity(ent.id);
         this.app.aiSystem.unregisterEntity(ent.id);
@@ -511,32 +511,35 @@ export class WorldSerializer {
             const isSolid = comps.physicsStats.isSolid && isAlive;
             const mask = isSolid ? COLLISION_MASK_ALL : COLLISION_MASK_NONE;
 
-            let rawBody: RAPIER.RigidBody | undefined = undefined;
-            let rawCollider: RAPIER.Collider | undefined = undefined;
-            let rawColliders: RAPIER.Collider[] | undefined = undefined;
+            let bodyHandle: PhysicsBodyHandle | undefined = undefined;
+            let colliderHandle: PhysicsColliderHandle | undefined = undefined;
+            let colliderHandles: PhysicsColliderHandle[] | undefined = undefined;
 
             if (this.app.physicsDriver?.isReady) {
               const pos3D = { x: trans?.x ?? 0, y: trans?.y ?? 0, z: trans?.z ?? 0 };
-              rawBody = this.app.physicsDriver.createFixedBody(pos3D, ent.id);
               const angle = trans?.angle ?? 0;
-              rawBody.setRotation(
-                { x: 0, y: Math.sin(angle * 0.5), z: 0, w: Math.cos(angle * 0.5) },
-                false
-              );
+              const rotation = trans?.rotation ?? {
+                x: 0,
+                y: Math.sin(angle * 0.5),
+                z: 0,
+                w: Math.cos(angle * 0.5),
+              };
 
-              const built = buildObstacleColliders(this.app.physicsDriver, rawBody, {
+              bodyHandle = this.app.physicsDriver.createFixedBody(pos3D, ent.id, { rotation });
+
+              const built = buildObstacleColliders(this.app.physicsDriver, bodyHandle, {
                 points,
                 height: comps.physicsStats?.height?.current ?? 1.5,
                 colliders: comps.physicsStats?.colliders,
               });
-              rawCollider = built.primaryCollider;
-              rawColliders = built.allColliders;
+              colliderHandle = built.primaryCollider;
+              colliderHandles = built.allColliders;
             }
 
             this.app.world.addComponent(ent.id, 'physicsBody', {
-              rawBody,
-              rawCollider,
-              rawColliders,
+              bodyHandle,
+              colliderHandle,
+              colliderHandles,
               bodyType: 'fixed',
               isStatic: true,
               category,
@@ -548,31 +551,35 @@ export class WorldSerializer {
             let category = CollisionCategory.CREATURE;
             let mask = comps.physicsStats.isSolid ? COLLISION_MASK_ALL : COLLISION_MASK_NONE;
 
-            let rawBody: RAPIER.RigidBody | undefined = undefined;
-            let rawCollider: RAPIER.Collider | undefined = undefined;
+            let bodyHandle: PhysicsBodyHandle | undefined = undefined;
+            let colliderHandle: PhysicsColliderHandle | undefined = undefined;
 
             if (archetype === 'item' || comps.physicsBody?.bodyType === 'dynamic') {
               const pos3D = { x: trans?.x ?? 0, y: trans?.y ?? 0.2, z: trans?.z ?? 0 };
-              rawBody = this.app.physics.createDynamicItemBody(this.app.world, ent.id, pos3D);
+              bodyHandle = this.app.physics.createDynamicItemBody(this.app.world, ent.id, pos3D);
 
-              // Захватываем созданный коллайдер, чтобы нижележащий код не затер его в ECS
               const newPhys = this.app.world.getComponent(ent.id, 'physicsBody');
               if (newPhys) {
-                rawCollider = newPhys.rawCollider;
+                colliderHandle = newPhys.colliderHandle;
               }
 
-              if (rawBody && trans?.rotation) {
-                rawBody.setRotation(trans.rotation, true);
+              if (bodyHandle !== undefined && trans?.rotation && this.app.physicsDriver) {
+                this.app.physicsDriver.setBodyRotation(bodyHandle, trans.rotation, true);
               }
 
-              // Восстановление физического импульса (например, при Undo во время полета предмета)
-              if (rawBody && comps.velocity) {
-                rawBody.setLinvel(
+              // Восстановление физического импульса
+              if (bodyHandle !== undefined && comps.velocity && this.app.physicsDriver) {
+                this.app.physicsDriver.setBodyLinearVelocity(
+                  bodyHandle,
                   { x: comps.velocity.vx, y: comps.velocity.vy, z: comps.velocity.vz },
                   true
                 );
                 if (comps.velocity.angvel) {
-                  rawBody.setAngvel(comps.velocity.angvel, true);
+                  this.app.physicsDriver.setBodyAngularVelocity(
+                    bodyHandle,
+                    comps.velocity.angvel,
+                    true
+                  );
                 }
               }
             } else if (archetype === 'zone') {
@@ -584,23 +591,25 @@ export class WorldSerializer {
 
             if (archetype === 'creature' && this.app.physicsDriver?.isReady) {
               const pos3D = { x: trans?.x ?? 0, y: trans?.y ?? 0, z: trans?.z ?? 0 };
-              rawBody = this.app.physicsDriver.createKinematicPositionBody(pos3D, ent.id);
+              bodyHandle = this.app.physicsDriver.createKinematicPositionBody(pos3D, ent.id);
               const r = comps.physicsStats?.radius?.current ?? 0.4;
               const w = comps.physicsStats?.weight?.current ?? 75;
               const halfHeight = Math.max(0.01, (1.8 - 2 * r) / 2);
               const offsetY = halfHeight + r;
-              rawCollider = this.app.physicsDriver.createCapsuleCollider(
+              colliderHandle = this.app.physicsDriver.createCapsuleCollider(
                 halfHeight,
                 r,
-                rawBody,
-                w,
-                offsetY
+                bodyHandle,
+                {
+                  mass: w,
+                  offset: { x: 0, y: offsetY, z: 0 },
+                }
               );
             }
 
             this.app.world.addComponent(ent.id, 'physicsBody', {
-              rawBody,
-              rawCollider,
+              bodyHandle,
+              colliderHandle,
               bodyType:
                 archetype === 'item'
                   ? 'dynamic'

@@ -1,5 +1,8 @@
-import RAPIER from '@dimforge/rapier3d-compat';
-import { IPhysicsDriver } from '../../physics/IPhysicsDriver';
+import {
+  IPhysicsDriver,
+  PhysicsBodyHandle,
+  PhysicsColliderHandle,
+} from '../../physics/IPhysicsDriver';
 import { ColliderPartDesc } from '../components/physics';
 import { Point } from '../../types';
 
@@ -67,38 +70,46 @@ export function scaleObstacleColliders(
 
 export function buildObstacleColliders(
   driver: IPhysicsDriver,
-  rawBody: RAPIER.RigidBody,
+  bodyHandle: PhysicsBodyHandle,
   configOrStats: {
     points?: Point[];
     height?: number | { current: number; base?: number };
     colliders?: ColliderPartDesc[];
   }
-): { primaryCollider?: RAPIER.Collider; allColliders: RAPIER.Collider[] } {
-  const colliders: RAPIER.Collider[] = [];
+): { primaryCollider?: PhysicsColliderHandle; allColliders: PhysicsColliderHandle[] } {
+  const colliders: PhysicsColliderHandle[] = [];
 
   if (configOrStats.colliders && configOrStats.colliders.length > 0) {
     for (const part of configOrStats.colliders) {
       if (part.shape === 'cylinder') {
         const h = part.halfHeight ?? 1.0;
         const r = part.radius ?? 0.3;
-        const col = driver.createCylinderCollider(h, r, rawBody, 0, part.offset);
-        if (col) colliders.push(col);
+        const col = driver.createCylinderCollider(h, r, bodyHandle, {
+          mass: 0,
+          offset: part.offset,
+        });
+        if (col !== undefined && col !== null) colliders.push(col);
       } else if (part.shape === 'cuboid') {
         const hx = part.halfExtents?.x ?? 0.5;
         const hy = part.halfExtents?.y ?? 0.5;
         const hz = part.halfExtents?.z ?? 0.5;
-        const col = driver.createCuboidCollider(hx, hy, hz, rawBody, 0, part.offset);
-        if (col) colliders.push(col);
+        const col = driver.createCuboidCollider(hx, hy, hz, bodyHandle, {
+          mass: 0,
+          offset: part.offset,
+        });
+        if (col !== undefined && col !== null) colliders.push(col);
       } else if (part.shape === 'ball') {
         const r = part.radius ?? 0.5;
-        const col = driver.createBallCollider(r, rawBody, 0);
-        if (part.offset) col.setTranslation(part.offset as any);
-        if (col) colliders.push(col);
+        const col = driver.createBallCollider(r, bodyHandle, { mass: 0, offset: part.offset });
+        if (col !== undefined && col !== null) colliders.push(col);
       } else if (part.shape === 'convexHull' && part.points) {
         const fArray =
           part.points instanceof Float32Array ? part.points : new Float32Array(part.points);
-        const col = driver.createConvexHullCollider(fArray, rawBody, 0);
-        if (col) colliders.push(col);
+        const col = driver.createConvexHullCollider(fArray, bodyHandle, {
+          mass: 0,
+          offset: part.offset,
+        });
+        if (col !== undefined && col !== null) colliders.push(col);
       }
     }
   } else {
@@ -130,8 +141,11 @@ export function buildObstacleColliders(
     const hy = height / 2;
     const hz = depth / 2;
 
-    const col = driver.createCuboidCollider(hx, hy, hz, rawBody, 0, { x: 0, y: hy, z: 0 });
-    if (col) colliders.push(col);
+    const col = driver.createCuboidCollider(hx, hy, hz, bodyHandle, {
+      mass: 0,
+      offset: { x: 0, y: hy, z: 0 },
+    });
+    if (col !== undefined && col !== null) colliders.push(col);
   }
 
   return { primaryCollider: colliders[0], allColliders: colliders };

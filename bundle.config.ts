@@ -1,34 +1,75 @@
 export const DOMAINS = {
   // 1. Искусственный интеллект и логика поведений (BT)
-  ai: ['src/ai/**/*'],
+  ai: ['src/ai/**/*', 'src/types.ts', 'src/utils.ts'],
 
   // 2. Боевая система, анатомия и статы
   combat: [
     'src/ecs/systems/AttackSystem.ts',
     'src/ecs/systems/DamageSystem.ts',
     'src/ecs/systems/AnatomySystem.ts',
+    'src/ecs/services/DeathService.ts',
     'src/ecs/utils/anatomy*.ts',
     'src/ecs/utils/combat.ts',
     'src/ecs/utils/health.ts',
+    'src/ecs/utils/hierarchy.ts',
     'src/ecs/components/combat.ts',
     'src/ecs/components/anatomy.ts',
     'src/ecs/components/stats.ts',
+    'src/ecs/components/movement.ts',
+    'src/ecs/templates/**/*',
+    'src/types.ts',
+    'src/utils.ts',
   ],
 
   // 3. Рендеринг, Three.js и окружение
-  rendering: ['src/rendering/**/*', 'src/ecs/systems/ThreeSyncSystem.ts'],
+  rendering: [
+    'src/rendering/**/*',
+    'src/ecs/systems/ThreeSyncSystem.ts',
+    'src/ecs/components/rendering.ts',
+    'src/config/graphicsConfig.ts',
+    'src/config/grassConfig.ts',
+    'src/config/cameraConfig.ts',
+    'src/config/terrainConfig.ts',
+    'src/types.ts',
+    'src/utils.ts',
+  ],
 
   // 4. Инвентарь, предметы и Drag-and-Drop
   inventory: [
     'src/ecs/components/inventory.ts',
     'src/ecs/utils/inventory.ts',
     'src/ecs/utils/itemValidation.ts',
+    'src/ecs/utils/hierarchy.ts',
     'src/editor/ItemTransferService.ts',
+    'src/core/contexts.ts',
+    'src/history/TransactionBuilder.ts',
+    'src/history/ICommand.ts',
+    'src/history/commands/EntitySnapshotCommand.ts',
     'src/dnd/**/*',
+    'src/types.ts',
+    'src/utils.ts',
   ],
 
   // 5. UI, HUD и Инспектор
-  ui: ['src/components/**/*', 'src/hooks/**/*', 'src/editor/**/*', 'src/core/contexts.ts'],
+  ui: [
+    'src/components/**/*',
+    'src/hooks/**/*',
+    'src/editor/**/*',
+    'src/core/**/*',
+    'src/types.ts',
+    'src/utils.ts',
+    'src/locales/**/*',
+  ],
+
+  // 6. Физическое ядро и адаптер ECS
+  physics: [
+    'src/physics/**/*',
+    'src/ecs/systems/PhysicsSystem.ts',
+    'src/ecs/components/physics.ts',
+    'src/ecs/utils/obstacleColliders.ts',
+    'src/types.ts',
+    'src/utils.ts',
+  ],
 
   // Полная сборка (на случай глобальных задач)
   all: ['src/**/*.{ts,tsx}'],
