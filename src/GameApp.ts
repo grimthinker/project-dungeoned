@@ -475,7 +475,7 @@ export class GameApp implements IEditorContext, ISelectionHostContext {
 
   public renderFrame(): void {
     let cursorWorldPos: Vec3 | null = null;
-    let throwTrajectory: { start: Vec3; v0: Vec3 } | null = null;
+    let throwTrajectory: { points: Vec3[] } | null = null;
 
     const isBrushActive = Boolean(this.terrainBrush?.active || this.propBrush?.active);
     const isThrowTargeting = Boolean(this.throwTargeting && this.gameMode === GameMode.GAME);
@@ -502,19 +502,69 @@ export class GameApp implements IEditorContext, ISelectionHostContext {
             z: transform.z + (dz / d) * spawnOffset,
           };
           const v0 = calculateThrowVelocity(startPos, pt, slot.strength, physStats.weight.current);
-          throwTrajectory = { start: startPos, v0 };
+
+          const terrainEntities = this.world.getEntitiesWith('terrain');
+          const terrain = terrainEntities.length > 0 ? terrainEntities[0][1].terrain : undefined;
+
+          const points: Vec3[] = [startPos];
+          const g = 9.81;
+          const dt = 0.03;
+          const maxTime = 3.0;
+
+          for (let t = dt; t <= maxTime; t += dt) {
+            const currX = startPos.x + v0.x * t;
+            const currY = startPos.y + v0.y * t - (g * t * t) / 2;
+            const currZ = startPos.z + v0.z * t;
+            const floorY = terrain
+              ? (this.simulation.aiSystem.getTerrainHeight(currX, currZ) ?? 0)
+              : 0;
+
+            if (currY <= floorY) {
+              points.push({ x: currX, y: floorY, z: currZ });
+              break;
+            }
+            points.push({ x: currX, y: currY, z: currZ });
+          }
+          throwTrajectory = { points };
         }
       }
     }
 
+    const activeSelectedId =
+      this.selection.selectedEntityId ??
+      (this.selection.selectedEntityIds.size > 0
+        ? (this.selection.selectedEntityIds.values().next().value ?? null)
+        : null);
+
+    const isSelectedOwned = Boolean(
+      this.selection.selectedEntityId &&
+      this.world.getComponent(this.selection.selectedEntityId, 'ownership')
+    );
+
+    const envEntities = this.world.getEntitiesWith('environment');
+    const environment = envEntities.length > 0 ? envEntities[0][1].environment : undefined;
+
+    const uiOverlays = this.showUIOverlays
+      ? this.simulation.threeSyncSystem.collectUIOverlays(this.world, this.gameMode)
+      : undefined;
+
+    const hoveredItemTooltip = this.simulation.threeSyncSystem.collectItemTooltip(
+      this.world,
+      this.selection.hoveredEntityId
+    );
+
+    const aiDebugData =
+      this.showAIDebug && this.gameMode !== GameMode.GAME
+        ? this.simulation.threeSyncSystem.collectAIDebug(this.world, activeSelectedId)
+        : null;
+
     this.renderer.render({
       camera: this.camera,
-      world: this.world,
-      physics: this.physics,
       gameMode: this.gameMode,
       editorData: {
         selectedId: this.selection.selectedEntityId,
         selectedIds: this.selection.selectedEntityIds,
+        isSelectedOwned,
         hoveredId: this.selection.hoveredEntityId,
         marqueeBox: this.selection.marqueeBox,
         showAIDebug: this.gameMode === GameMode.GAME ? false : this.showAIDebug,
@@ -525,6 +575,10 @@ export class GameApp implements IEditorContext, ISelectionHostContext {
         throwTrajectory,
       },
       showUIOverlays: this.showUIOverlays,
+      uiOverlays,
+      hoveredItemTooltip,
+      aiDebugData,
+      environment,
       showFPSMonitor: this.showFPSMonitor,
       fpsStats: this.fpsMonitor.getStats(),
     });

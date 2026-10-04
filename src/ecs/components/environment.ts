@@ -1,20 +1,3 @@
-export interface EnvironmentComponent {
-  /** Текущее время суток в часах от 0.0 до 24.0 (12.0 — полдень, 0.0 — полночь) */
-  timeOfDay: number;
-  /** Длительность полных суток в игровых секундах (например, 600 = 10 минут) */
-  dayDuration: number;
-  /** Азимут сторон света (поворот небесной сферы вокруг вертикали Y в радианах) */
-  azimuth: number;
-  /** Угол наклона оси вращения небесных светил (в радианах) */
-  axialTilt: number;
-  /** Плотность экспоненциальной дымки у горизонта */
-  fogDensity: number;
-  /** Интенсивность рассеянного фонового света (освещенность теней) */
-  ambientIntensity?: number;
-  /** Множитель яркости прямого солнечного и лунного света */
-  sunIntensityMultiplier?: number;
-  /** Цвет верхнего рассеянного света полусферы (небо) */
-  hemiSkyColor?: string;
-  /** Цвет нижнего рассеянного света полусферы (земля/отражение) */
-  hemiGroundColor?: string;
-}
+import { EnvironmentData } from '../../utils';
+
+export type EnvironmentComponent = EnvironmentData;

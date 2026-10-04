@@ -54,8 +54,17 @@ export const ModelPreviewViewport: React.FC<ModelPreviewViewportProps> = ({
   useEffect(() => {
     if (!previewRef.current || !world) return;
     const assembly = world.getComponent(creatureId, 'assemblyRoot');
+    const attachments: { modelId: string; rigNodeName: string }[] = [];
+    if (assembly?.partIds) {
+      for (const partId of assembly.partIds) {
+        const visual = world.getComponent(partId, 'visualModel');
+        if (visual?.modelId && visual.rigNodeName) {
+          attachments.push({ modelId: visual.modelId, rigNodeName: visual.rigNodeName });
+        }
+      }
+    }
     previewRef.current
-      .loadRig(structureType, assembly?.partIds, world)
+      .loadRig(structureType, attachments)
       .then(() => {
         previewRef.current?.setSpeed(speed);
         previewRef.current?.playAnimation(animName);

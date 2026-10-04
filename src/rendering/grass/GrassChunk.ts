@@ -5,8 +5,6 @@ import {
   getTerrainHeightAt,
   getTerrainNormalAt,
 } from '../../ecs/components/terrain';
-import { World } from '../../ecs/World';
-import { IPhysicsDriver } from '../../physics/IPhysicsDriver';
 import { GRASS_CONFIG } from '../../config/grassConfig';
 import { TERRAIN_CONFIG } from '../../config/terrainConfig';
 
@@ -29,12 +27,7 @@ export class GrassChunk {
     private geometries: Record<FoliageVariant, THREE.BufferGeometry>
   ) {}
 
-  public build(
-    terrain: TerrainComponent,
-    world: World,
-    physics: IPhysicsDriver | null,
-    densityFactor: number
-  ): void {
+  public build(terrain: TerrainComponent, densityFactor: number): void {
     this.dispose();
 
     const size = TERRAIN_CONFIG.chunkSize;

@@ -13,6 +13,7 @@ import { TerrainSyncSystem } from '../../rendering/terrain/TerrainSyncSystem';
 import {
   CreatureMeshAssembler,
   RigAnimatorState as AnimatorState,
+  MeshAttachmentDesc,
 } from '../../rendering/creatures/CreatureMeshAssembler';
 import { RigSocketBinder } from '../../rendering/creatures/RigSocketBinder';
 import {
@@ -29,8 +30,13 @@ import { WaterRippleManager, WaterDisturbance } from '../../rendering/water/Wate
 import { GRAPHICS_CONFIG } from '../../config/graphicsConfig';
 import { WaterComponent } from '../components/water';
 import { TransformComponent } from '../components/physics';
-import { getTerrainHeightAt } from '../components/terrain';
+import { getTerrainHeightAt, TerrainComponent } from '../components/terrain';
 import { GRASS_CONFIG } from '../../config/grassConfig';
+import { LOGIC_CONFIG } from '../../ai/config';
+import { Vec3 } from '../../types';
+import { getEffectiveLogicBrain } from '../utils/anatomy';
+import { AIDebugDTO, EntityOverlayDTO, ItemTooltipDTO } from '../../rendering/IRenderer';
+import { TrampleStamp } from '../../rendering/grass/TrampleTextureManager';
 
 const PROCEDURAL_PROP_SCALES: Record<
   string,
@@ -176,7 +182,18 @@ export class ThreeSyncSystem {
       this.loadingMeshes,
       this.loadingGenerations,
       (id, state) => this.animators.set(id, state),
-      (id, animator, anim) => this.playAnimation(id, animator, anim)
+      (id, rigType, anim) => {
+        const state = this.animators.get(id);
+        if (state) {
+          return this.playAnimation(
+            id,
+            { rigType, currentAnimation: anim, playbackSpeed: 1, clipsMap: {} },
+            anim
+          );
+        }
+        return Promise.resolve();
+      },
+      (id) => Boolean(this.currentWorld?.hasEntity(id))
     );
     this.grassSync = new GrassSyncSystem(scene, renderer);
   }
@@ -230,6 +247,8 @@ export class ThreeSyncSystem {
     this.matCelOutline.dispose();
   }
 
+  private currentWorld: World | null = null;
+
   public update(
     dt: number,
     world: World,
@@ -239,6 +258,7 @@ export class ThreeSyncSystem {
     cameraTargetX: number = 0,
     cameraTargetZ: number = 0
   ): void {
+    this.currentWorld = world;
     if (celShading !== this.isCelShading) {
       this.isCelShading = celShading;
       for (const [, obj] of this.meshes.entries()) {
@@ -670,7 +690,19 @@ export class ThreeSyncSystem {
             }
 
             // Прикрепление экипированного оружия/предметов в кости рук через RigSocketBinder
-            this.socketBinder.syncCreatureSockets(id, animState, world, this.meshes, this.scene);
+            const aggSlots = getAggregatedInteractionSlots(world, id);
+            const bindings = aggSlots.map((s) => ({
+              rigSocketName: s.slot.rigSocketName || '',
+              itemId: s.slot.itemId,
+            }));
+            this.socketBinder.syncCreatureSockets(
+              id,
+              animState,
+              bindings,
+              this.meshes,
+              this.scene,
+              (entId) => world.hasEntity(entId)
+            );
           }
         }
         // 4. Фоллбэк-визуализация примитивов
@@ -757,7 +789,282 @@ export class ThreeSyncSystem {
     // Синхронизация процедурной интерактивной травы с поддержкой многоуровневых мешей
     const terrainEntities = world.getEntitiesWith('terrain');
     const terrainComp = terrainEntities.length > 0 ? terrainEntities[0][1].terrain : undefined;
-    this.grassSync.update(dt, world, this.physicsDriver, terrainComp, cameraTargetX, cameraTargetZ);
+    const trampleStamps = this.collectTrampleStamps(world, terrainComp);
+    this.grassSync.update(dt, trampleStamps, terrainComp, cameraTargetX, cameraTargetZ);
+  }
+
+  public collectTrampleStamps(world: World, terrainComp?: TerrainComponent): TrampleStamp[] {
+    const stamps: TrampleStamp[] = [];
+
+    const isNearGround = (y: number, x: number, z: number): boolean => {
+      let groundY = 0;
+      if (terrainComp) {
+        const h = getTerrainHeightAt(terrainComp, x, z);
+        if (h !== null) groundY = h;
+      }
+      return y - groundY < 0.6;
+    };
+
+    // 1. Игрок
+    const entities = world.getEntitiesWith('transform', 'aiStats', 'health');
+    for (const [id, { transform, aiStats, health }] of entities) {
+      if (health.isAlive && aiStats.behavior.current === 'PlayerTree') {
+        if (!isNearGround(transform.y, transform.x, transform.z)) continue;
+
+        const physStats = world.getComponent(id, 'physicsStats');
+        const vel = world.getComponent(id, 'velocity');
+        const speed = Math.hypot(vel?.vx ?? 0, vel?.vz ?? 0);
+        const isMoving = speed > 0.1;
+
+        const dirX = isMoving ? vel!.vx / speed : 0;
+        const dirZ = isMoving ? vel!.vz / speed : 0;
+
+        const baseRadius = physStats?.radius.current ?? 0.4;
+        const stampRadius = baseRadius + (isMoving ? 0.35 : 0.22);
+
+        stamps.push({
+          x: transform.x,
+          z: transform.z,
+          radius: stampRadius,
+          dirX,
+          dirZ,
+          strength: 1.0,
+        });
+        break;
+      }
+    }
+
+    // 2. Другие существа
+    const creatures = world.getEntitiesWith('transform', 'health', 'meta');
+    for (const [id, { transform, health, meta }] of creatures) {
+      if (meta.entityType === 'creature' && health.isAlive) {
+        if (!isNearGround(transform.y, transform.x, transform.z)) continue;
+
+        const ai = world.getComponent(id, 'aiStats');
+        if (ai?.behavior.current === 'PlayerTree') continue;
+
+        const physStats = world.getComponent(id, 'physicsStats');
+        const vel = world.getComponent(id, 'velocity');
+        const speed = Math.hypot(vel?.vx ?? 0, vel?.vz ?? 0);
+        const isMoving = speed > 0.1;
+
+        const dirX = isMoving ? vel!.vx / speed : 0;
+        const dirZ = isMoving ? vel!.vz / speed : 0;
+
+        const baseRadius = physStats?.radius.current ?? 0.4;
+        const stampRadius = baseRadius + (isMoving ? 0.3 : 0.2);
+
+        stamps.push({
+          x: transform.x,
+          z: transform.z,
+          radius: stampRadius,
+          dirX,
+          dirZ,
+          strength: 0.95,
+        });
+      }
+    }
+
+    // 3. Предметы
+    const items = world.getEntitiesWith('transform', 'item');
+    for (const [id, { transform, item }] of items) {
+      if (world.getComponent(id, 'ownership')) continue;
+
+      const physStats = world.getComponent(id, 'physicsStats');
+      const itemRadius = physStats?.radius.current ?? 0.3;
+
+      if (!isNearGround(transform.y - itemRadius, transform.x, transform.z)) continue;
+
+      const thrown = world.getComponent(id, 'thrownObject');
+      const vel = world.getComponent(id, 'velocity');
+
+      const weight = physStats?.weight.current ?? 1;
+      const size = item.size ?? 1;
+      const speed = Math.hypot(vel?.vx ?? 0, vel?.vz ?? 0);
+
+      const isMoving = vel && (speed > 0.3 || Math.abs(vel.vy) > 0.3);
+      const isAirborne = thrown?.isAirborne;
+
+      if (size >= 4 || weight >= 2 || isAirborne || isMoving) {
+        const isDirMoving = speed > 0.05;
+        const dirX = isDirMoving ? vel!.vx / speed : 0;
+        const dirZ = isDirMoving ? vel!.vz / speed : 0;
+        const stampRadius = itemRadius + (isMoving || isAirborne ? 0.25 : 0.15);
+
+        stamps.push({
+          x: transform.x,
+          z: transform.z,
+          radius: stampRadius,
+          dirX,
+          dirZ,
+          strength: Math.min(1.0, 0.4 + weight * 0.1),
+        });
+      }
+    }
+
+    return stamps;
+  }
+
+  public collectUIOverlays(world: World, gameMode: string): EntityOverlayDTO[] {
+    const list: EntityOverlayDTO[] = [];
+    const entities = world.getEntitiesWith('transform', 'meta');
+
+    for (const [id, entity] of entities) {
+      const tag = world.getComponent(id, 'tag');
+      const archetype = tag?.archetype ?? entity.meta?.entityType;
+
+      if (
+        archetype === 'item' ||
+        archetype === 'marker' ||
+        archetype === 'bodyPart' ||
+        archetype === 'terrain' ||
+        archetype === 'environment'
+      ) {
+        continue;
+      }
+
+      const health = world.getComponent(id, 'health');
+      if (health && !health.isAlive) continue;
+
+      const isObstacle = archetype === 'obstacle';
+      if (isObstacle) {
+        if (!entity.meta?.destructible) continue;
+        if (gameMode === 'game' && (!health?.healthBarTimer || health.healthBarTimer <= 0)) {
+          continue;
+        }
+      }
+
+      let overlayAlpha = 1;
+      if (isObstacle && gameMode === 'game' && health?.healthBarTimer) {
+        overlayAlpha = Math.min(1, Math.max(0, health.healthBarTimer / 0.3));
+      }
+
+      const physStats = world.getComponent(id, 'physicsStats');
+      const radius = physStats?.radius.current ?? 0.4;
+
+      let meshHeight = 1.8;
+      if (isObstacle) meshHeight = 1.6;
+      else if (archetype === 'zone') meshHeight = 0.1;
+      else if (archetype === 'creature') meshHeight = 1.8;
+
+      list.push({
+        id,
+        name: entity.meta?.name ?? id,
+        worldPos: {
+          x: entity.transform.x,
+          y: entity.transform.y + meshHeight,
+          z: entity.transform.z,
+        },
+        radius,
+        hp: health ? health.current : undefined,
+        maxHp: health ? health.max.current : undefined,
+        isObstacle,
+        alpha: overlayAlpha,
+        showName: gameMode !== 'game',
+      });
+    }
+
+    return list;
+  }
+
+  public collectItemTooltip(world: World, hoveredId: string | null): ItemTooltipDTO | null {
+    if (!hoveredId) return null;
+    const entity = world.getEntity(hoveredId);
+    if (!entity || !entity.transform || !entity.item) return null;
+
+    const radius = entity.physicsStats?.radius.current ?? 0.4;
+    return {
+      name: entity.item.name,
+      worldPos: {
+        x: entity.transform.x,
+        y: entity.transform.y,
+        z: entity.transform.z,
+      },
+      radius,
+    };
+  }
+
+  public collectAIDebug(world: World, selectedId: string | null | undefined): AIDebugDTO | null {
+    if (!selectedId) return null;
+    const entity = world.getEntity(selectedId);
+    if (!entity) return null;
+
+    const rootId = getRootOwner(world, selectedId) ?? selectedId;
+    const rootEntity = world.getEntity(rootId) ?? entity;
+    const transform = entity.transform ?? rootEntity.transform;
+    if (!transform) return null;
+
+    const brain =
+      getEffectiveLogicBrain(world, selectedId) ?? getEffectiveLogicBrain(world, rootId);
+    const aiStats = rootEntity.aiStats ?? entity.aiStats;
+    if (!brain && !aiStats) return null;
+
+    const bb = brain?.blackboard;
+    const perception = rootEntity.perception ?? entity.perception;
+
+    let detectRadius: number | undefined = bb?.get('detectDist') ?? bb?.get('detect_dist');
+    if (detectRadius === undefined || Number.isNaN(detectRadius)) {
+      if (perception && perception.visionMaxDistance > 0) {
+        detectRadius = Math.max(perception.visionMaxDistance, perception.hearingMaxDistance ?? 0);
+      } else if (aiStats?.stats?.detectDist !== undefined) {
+        detectRadius = aiStats.stats.detectDist;
+      } else {
+        detectRadius = LOGIC_CONFIG.detectDist;
+      }
+    }
+
+    let loseRadius: number | undefined = bb?.get('loseTargetDist') ?? bb?.get('lose_target_dist');
+    if (loseRadius === undefined || Number.isNaN(loseRadius)) {
+      if (aiStats?.stats?.loseTargetDist !== undefined) {
+        loseRadius = aiStats.stats.loseTargetDist;
+      } else if (detectRadius !== undefined && detectRadius > 0) {
+        loseRadius = detectRadius * 1.4;
+      } else {
+        loseRadius = LOGIC_CONFIG.loseTargetDist;
+      }
+    }
+
+    let targetPos: Vec3 | undefined;
+    const targetPosVal = bb?.get('target_pos') ?? bb?.get('targetPos');
+    if (targetPosVal && typeof targetPosVal === 'object') {
+      if (Array.isArray(targetPosVal) && targetPosVal.length >= 2) {
+        targetPos = {
+          x: Number(targetPosVal[0]) || 0,
+          y: Number(targetPosVal[1]) || 0.1,
+          z: Number(targetPosVal[2]) || 0,
+        };
+      } else if ('x' in targetPosVal && 'z' in targetPosVal) {
+        const o = targetPosVal as any;
+        targetPos = { x: Number(o.x) || 0, y: Number(o.y) || 0.1, z: Number(o.z) || 0 };
+      }
+    }
+
+    let targetEntity: { name: string; pos: Vec3 } | undefined;
+    const targetIdVal = bb?.get('targetId') ?? bb?.get('target_id');
+    if (targetIdVal) {
+      const tIdStr = String(targetIdVal);
+      const tOwner = getRootOwner(world, tIdStr);
+      const tTrans =
+        world.getComponent(tIdStr, 'transform') ??
+        (tOwner ? world.getComponent(tOwner, 'transform') : undefined);
+      if (tTrans) {
+        const tMeta =
+          world.getComponent(tIdStr, 'meta') ??
+          (tOwner ? world.getComponent(tOwner, 'meta') : undefined);
+        targetEntity = {
+          name: tMeta?.name ?? tIdStr,
+          pos: { x: tTrans.x, y: tTrans.y, z: tTrans.z },
+        };
+      }
+    }
+
+    return {
+      entityPos: { x: transform.x, y: transform.y, z: transform.z },
+      detectRadius,
+      loseRadius,
+      targetPos,
+      targetEntity,
+    };
   }
 
   private async playAnimation(
@@ -843,14 +1150,42 @@ export class ThreeSyncSystem {
     id: EntityId,
     archetype: string | undefined
   ): THREE.Object3D | undefined {
+    const animator = world.getComponent(id, 'animator');
+    const assembly = world.getComponent(id, 'assemblyRoot');
+
     // Сборка модульного рига для существ через ассемблер
-    if (this.creatureAssembler.canAssembleModularRig(world, id, archetype)) {
-      return this.creatureAssembler.createModularRig(world, id);
+    if (this.creatureAssembler.canAssembleModularRig(animator?.rigType, archetype)) {
+      const parts: MeshAttachmentDesc[] = [];
+      if (assembly?.partIds) {
+        for (const pId of assembly.partIds) {
+          const vis = world.getComponent(pId, 'visualModel');
+          if (vis?.modelId && vis.rigNodeName) {
+            parts.push({ partId: pId, modelId: vis.modelId, rigNodeName: vis.rigNodeName });
+          }
+        }
+      }
+      return this.creatureAssembler.createModularRig(id, {
+        rigType: animator!.rigType as BodyStructureType,
+        parts,
+      });
     }
 
     // Сборка оторванной составной части тела через ассемблер
-    if (this.creatureAssembler.canAssembleDetachedLimb(world, id, archetype)) {
-      return this.creatureAssembler.createDetachedLimb(world, id);
+    if (assembly && (archetype === 'item' || archetype === 'bodyPart')) {
+      const visual = world.getComponent(id, 'visualModel');
+      const anchorTag = world.getComponent(assembly.rootPartId, 'tag');
+      const parts: MeshAttachmentDesc[] = [];
+      for (const pId of assembly.partIds) {
+        const vis = world.getComponent(pId, 'visualModel');
+        if (vis?.modelId && vis.rigNodeName) {
+          parts.push({ partId: pId, modelId: vis.modelId, rigNodeName: vis.rigNodeName });
+        }
+      }
+      return this.creatureAssembler.createDetachedLimb(id, {
+        rigType: (visual?.rigType as BodyStructureType) || 'humanoid',
+        rootPartSubType: anchorTag?.subType,
+        parts,
+      });
     }
 
     // Загрузка реального 3D меша для сущностей с визуальной моделью (предметы, препятствия, части тела)

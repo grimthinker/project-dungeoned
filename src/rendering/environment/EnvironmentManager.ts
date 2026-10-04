@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { EnvironmentComponent } from '../../ecs/components/environment';
 import { SkyDome, SkyColors } from './SkyDome';
 import { GRAPHICS_CONFIG } from '../../config/graphicsConfig';
+import { EnvironmentData } from '../../utils';
 
 export class EnvironmentManager {
   private skyDome: SkyDome;
@@ -71,7 +71,7 @@ export class EnvironmentManager {
     scene: THREE.Scene,
     camera: THREE.PerspectiveCamera,
     focusTarget: { x: number; y: number; z: number },
-    env: EnvironmentComponent,
+    env: EnvironmentData,
     visibleRadius: number = GRAPHICS_CONFIG.shadows.bounds
   ): void {
     const time = env.timeOfDay;

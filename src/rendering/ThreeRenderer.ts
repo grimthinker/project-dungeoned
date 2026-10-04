@@ -1,23 +1,24 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import { IRenderer, RenderContext } from './IRenderer';
+import {
+  IRenderer,
+  RenderContext,
+  EntityOverlayDTO,
+  ItemTooltipDTO,
+  AIDebugDTO,
+} from './IRenderer';
 import { Camera } from '../Camera';
 import { EnvironmentManager } from './environment/EnvironmentManager';
 import { Point, Vec3 } from '../types';
-import { EntityId } from '../ecs/types';
-import { World } from '../ecs/World';
 import { EventBus } from '../core/EventBus';
 import { GlobalInput } from '../input/GlobalInput';
 import { EDITOR_CONFIG } from '../config/editorConfig';
 import { AI_DEBUG_CONFIG } from '../config/aiDebugConfig';
-import { getEffectiveLogicBrain } from '../ecs/utils/anatomy';
-import { getRootOwner } from '../ecs/utils/hierarchy';
-import { LOGIC_CONFIG } from '../ai/config';
 import { IModelPreview } from './IModelPreview';
 import { ThreeModelPreview } from './ThreeModelPreview';
 import { TERRAIN_CONFIG } from '../config/terrainConfig';
 import { GRAPHICS_CONFIG } from '../config/graphicsConfig';
-import { getTerrainHeightAt } from '../ecs/components/terrain';
+import { EntityId } from '../ecs/types';
 
 const DASH_THROW_TRAJECTORY = [5, 5];
 const DASH_EMPTY: number[] = [];
@@ -528,7 +529,7 @@ export class ThreeRenderer implements IRenderer {
           break;
         }
       }
-      const isOwned = !!context.world.getComponent(context.editorData.selectedId, 'ownership');
+      const isOwned = Boolean(context.editorData.isSelectedOwned);
 
       if (mesh && !isOwned) {
         if (this.transformControl.object !== mesh) {
@@ -601,8 +602,7 @@ export class ThreeRenderer implements IRenderer {
     }
 
     // Синхронизация небесного купола, положения светил, теней и тумана
-    const envEntities = context.world.getEntitiesWith('environment');
-    const env = envEntities.length > 0 ? envEntities[0][1].environment : DEFAULT_ENV_FALLBACK;
+    const env = context.environment ?? DEFAULT_ENV_FALLBACK;
 
     const visibleRadius = dist * GRAPHICS_CONFIG.shadows.frustumMargin;
 
@@ -724,27 +724,20 @@ export class ThreeRenderer implements IRenderer {
     // --- Отрисовка 2D UI поверх 3D сцены (полная гарантированная очистка всего холста) ---
     this.uiCtx.clearRect(0, 0, this.uiCanvas.width, this.uiCanvas.height);
 
-    if (context.showUIOverlays) {
-      this.renderUIOverlays(context.world, context.gameMode);
+    if (context.showUIOverlays && context.uiOverlays) {
+      this.renderUIOverlays(context.uiOverlays);
     }
-    if (context.editorData.hoveredId) {
-      this.renderItemTooltip(context.world, context.editorData.hoveredId);
+    if (context.hoveredItemTooltip) {
+      this.renderItemTooltip(context.hoveredItemTooltip);
     }
     if (context.editorData.marqueeBox) {
       this.renderScreenMarqueeBox(context.editorData.marqueeBox);
     }
-    if (context.editorData.showAIDebug && context.gameMode !== 'game') {
-      const activeSelectedId =
-        context.editorData.selectedId ??
-        (context.editorData.selectedIds.size > 0
-          ? context.editorData.selectedIds.values().next().value
-          : null);
-      if (activeSelectedId) {
-        this.renderAIDebug(context.world, activeSelectedId);
-      }
+    if (context.editorData.showAIDebug && context.gameMode !== 'game' && context.aiDebugData) {
+      this.renderAIDebug(context.aiDebugData);
     }
     if (context.editorData.throwTrajectory) {
-      this.renderThrowTrajectory(context.editorData.throwTrajectory, context.world);
+      this.renderThrowTrajectory(context.editorData.throwTrajectory);
     }
 
     const shouldShowFPS =
@@ -873,61 +866,28 @@ export class ThreeRenderer implements IRenderer {
     ctx.restore();
   }
 
-  private renderThrowTrajectory(trajectory: { start: Vec3; v0: Vec3 }, world: World): void {
-    const g = 9.81;
-    const dt = 0.03;
-    const maxTime = 3.0; // Защита от бесконечного цикла
+  private renderThrowTrajectory(trajectory: { points: Vec3[] }): void {
+    const pts = trajectory.points;
+    if (pts.length < 2) return;
 
-    let prevX = trajectory.start.x;
-    let prevY = trajectory.start.y;
-    let prevZ = trajectory.start.z;
-
-    const terrainEntities = world.getEntitiesWith('terrain');
-    const terrain = terrainEntities.length > 0 ? terrainEntities[0][1].terrain : undefined;
-
-    for (let t = dt; t <= maxTime; t += dt) {
-      const currX = trajectory.start.x + trajectory.v0.x * t;
-      const currY = trajectory.start.y + trajectory.v0.y * t - (g * t * t) / 2;
-      const currZ = trajectory.start.z + trajectory.v0.z * t;
-
-      const floorY = terrain ? (getTerrainHeightAt(terrain, currX, currZ) ?? 0) : 0;
-
-      if (currY <= floorY) {
-        this.drawProjectedLine(
-          prevX,
-          prevY,
-          prevZ,
-          currX,
-          floorY,
-          currZ,
-          'rgba(231, 76, 60, 0.8)',
-          DASH_THROW_TRAJECTORY,
-          2
-        );
-        prevX = currX;
-        prevY = floorY;
-        prevZ = currZ;
-        break;
-      }
-
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
       this.drawProjectedLine(
-        prevX,
-        prevY,
-        prevZ,
-        currX,
-        currY,
-        currZ,
+        p1.x,
+        p1.y,
+        p1.z,
+        p2.x,
+        p2.y,
+        p2.z,
         'rgba(231, 76, 60, 0.8)',
         DASH_THROW_TRAJECTORY,
         2
       );
-
-      prevX = currX;
-      prevY = currY;
-      prevZ = currZ;
     }
 
-    this.drawProjectedCircle(prevX, prevY, prevZ, 0.4, '#e74c3c', DASH_EMPTY, 'Прицел', 0, 16);
+    const last = pts[pts.length - 1];
+    this.drawProjectedCircle(last.x, last.y, last.z, 0.4, '#e74c3c', DASH_EMPTY, 'Прицел', 0, 16);
   }
 
   private renderScreenMarqueeBox(box: { start: Point; current: Point }): void {
@@ -952,76 +912,27 @@ export class ThreeRenderer implements IRenderer {
     this.uiCtx.restore();
   }
 
-  private renderUIOverlays(world: World, gameMode: string): void {
-    const entities = world.getEntitiesWith('transform', 'meta');
+  private renderUIOverlays(overlays: EntityOverlayDTO[]): void {
     const w = this.uiCanvas.width;
     const h = this.uiCanvas.height;
 
-    for (const [id, entity] of entities) {
-      const tag = world.getComponent(id, 'tag');
-      const archetype = tag?.archetype ?? entity.meta?.entityType;
-
-      // Имена для предметов, террейна, окружения, маркеров и частей тела скрыты в общем оверлее
-      if (
-        archetype === 'item' ||
-        archetype === 'marker' ||
-        archetype === 'bodyPart' ||
-        archetype === 'terrain' ||
-        archetype === 'environment'
-      ) {
-        continue;
-      }
-
-      const health = world.getComponent(id, 'health');
-      if (health && !health.isAlive) continue;
-
-      const transform = entity.transform;
-      const meta = entity.meta;
-      const isObstacle = archetype === 'obstacle';
-
-      if (isObstacle) {
-        if (!meta?.destructible) continue;
-        if (gameMode === 'game') {
-          if (!health?.healthBarTimer || health.healthBarTimer <= 0) continue;
-        }
-      }
-
-      let overlayAlpha = 1;
-      if (isObstacle && gameMode === 'game' && health?.healthBarTimer) {
-        overlayAlpha = Math.min(1, Math.max(0, health.healthBarTimer / 0.3));
-      }
-
-      const physStats = world.getComponent(id, 'physicsStats');
-      const radius = physStats?.radius.current ?? 16;
-
-      // Метрическая высота моделей для позиционирования UI над ними
-      let meshHeight = 1.8;
-      if (isObstacle) meshHeight = 1.6;
-      else if (archetype === 'zone') meshHeight = 0.1;
-      else if (archetype === 'creature') meshHeight = 1.8;
-
-      // Проекция 3D точки (верхушка меша) на 2D экран
-      const pos3D = this._tempV1.set(transform.x, transform.y + meshHeight + 0.3, transform.z);
+    for (const item of overlays) {
+      const pos3D = this._tempV1.set(item.worldPos.x, item.worldPos.y + 0.3, item.worldPos.z);
       pos3D.project(this.camera);
 
-      // Отбрасываем объекты за спиной камеры
       if (pos3D.z > 1) continue;
 
       const screenX = (pos3D.x * 0.5 + 0.5) * w;
       const screenY = (-(pos3D.y * 0.5) + 0.5) * h;
 
       this.uiCtx.save();
-      this.uiCtx.globalAlpha = overlayAlpha;
+      this.uiCtx.globalAlpha = item.alpha;
       this.uiCtx.translate(screenX, screenY);
 
-      // Отрисовка полоски здоровья (только для разрушаемых препятствий согласно п. 10 ТЗ)
-      if (health && isObstacle) {
-        const hp = health.current;
-        const maxHp = health.max.current;
-        // Увеличим ширину бара, чтобы она не была слишком маленькой для метрических радиусов
-        const barW = Math.max(30, radius * 30);
+      if (item.isObstacle && item.hp !== undefined && item.maxHp !== undefined) {
+        const barW = Math.max(30, item.radius * 30);
         const barH = 5;
-        const hpRatio = Math.max(0, Math.min(1, maxHp > 0 ? hp / maxHp : 0));
+        const hpRatio = Math.max(0, Math.min(1, item.maxHp > 0 ? item.hp / item.maxHp : 0));
 
         this.uiCtx.fillStyle = 'rgba(0,0,0,0.6)';
         this.uiCtx.fillRect(-barW / 2, -10, barW, barH);
@@ -1029,30 +940,25 @@ export class ThreeRenderer implements IRenderer {
         this.uiCtx.fillRect(-barW / 2, -10, barW * hpRatio, barH);
       }
 
-      // Отрисовка текста ID/Name (только вне игрового режима)
-      if (gameMode !== 'game') {
+      if (item.showName) {
         this.uiCtx.fillStyle = '#ffffff';
         this.uiCtx.font = '11px sans-serif';
         this.uiCtx.textAlign = 'center';
         this.uiCtx.textBaseline = 'bottom';
-        const displayName = meta?.name ?? id;
-        this.uiCtx.fillText(displayName, 0, health && isObstacle ? -14 : -4);
+        this.uiCtx.fillText(item.name, 0, item.isObstacle && item.hp !== undefined ? -14 : -4);
       }
 
       this.uiCtx.restore();
     }
   }
 
-  private renderItemTooltip(world: World, hoveredId: string): void {
-    const entity = world.getEntity(hoveredId);
-    if (!entity || !entity.transform || !entity.item) return;
-
-    const transform = entity.transform;
-    const radius = entity.physicsStats?.radius.current ?? 0.4;
-    const meshHeight = Math.max(0.3, radius * 1.5);
-
-    // Корректные 3D координаты в метрах (высота Y + сдвиг, глубина Z)
-    const pos3D = this._tempV1.set(transform.x, transform.y + meshHeight + 0.2, transform.z);
+  private renderItemTooltip(tooltip: ItemTooltipDTO): void {
+    const meshHeight = Math.max(0.3, tooltip.radius * 1.5);
+    const pos3D = this._tempV1.set(
+      tooltip.worldPos.x,
+      tooltip.worldPos.y + meshHeight + 0.2,
+      tooltip.worldPos.z
+    );
     pos3D.project(this.camera);
 
     if (pos3D.z > 1) return;
@@ -1072,212 +978,106 @@ export class ThreeRenderer implements IRenderer {
     this.uiCtx.shadowBlur = 4;
     this.uiCtx.shadowOffsetX = 1;
     this.uiCtx.shadowOffsetY = 1;
-    this.uiCtx.fillText(entity.item.name, 0, 0);
+    this.uiCtx.fillText(tooltip.name, 0, 0);
     this.uiCtx.restore();
   }
 
-  private renderAIDebug(world: World, selectedId: string): void {
-    const entity = world.getEntity(selectedId);
-    if (!entity) return;
-
-    const rootId = getRootOwner(world, selectedId) ?? selectedId;
-    const rootEntity = world.getEntity(rootId) ?? entity;
-
-    const transform = entity.transform ?? rootEntity.transform;
-    if (!transform) return;
-
-    const posX = transform.x;
-    const posY = transform.y;
-    const posZ = transform.z;
-
-    const brain =
-      getEffectiveLogicBrain(world, selectedId) ?? getEffectiveLogicBrain(world, rootId);
-    const aiStats = rootEntity.aiStats ?? entity.aiStats;
-
-    if (!brain && !aiStats) return;
-
-    const bb = brain?.blackboard;
-    const perception = rootEntity.perception ?? entity.perception;
-
-    let detectRadius: number | undefined = bb?.get('detectDist') ?? bb?.get('detect_dist');
-    if (detectRadius === undefined || Number.isNaN(detectRadius)) {
-      if (perception && perception.visionMaxDistance > 0) {
-        detectRadius = Math.max(perception.visionMaxDistance, perception.hearingMaxDistance ?? 0);
-      } else if (aiStats?.stats?.detectDist !== undefined) {
-        detectRadius = aiStats.stats.detectDist;
-      } else {
-        detectRadius = LOGIC_CONFIG.detectDist;
-      }
-    }
-
-    let loseRadius: number | undefined =
-      bb?.get('loseTargetDist') ?? bb?.get('lose_target_dist') ?? bb?.get('loseDist');
-    if (loseRadius === undefined || Number.isNaN(loseRadius)) {
-      if (aiStats?.stats?.loseTargetDist !== undefined) {
-        loseRadius = aiStats.stats.loseTargetDist;
-      } else if (detectRadius !== undefined && detectRadius > 0) {
-        loseRadius = detectRadius * 1.4;
-      } else {
-        loseRadius = LOGIC_CONFIG.loseTargetDist;
-      }
-    }
-
+  private renderAIDebug(debug: AIDebugDTO): void {
+    const { x: posX, y: posY, z: posZ } = debug.entityPos;
     const w = this.uiCanvas.width;
     const h = this.uiCanvas.height;
 
-    // 1. Отрисовка радиуса поиска цели (Detect Radius)
-    if (detectRadius !== undefined && detectRadius > 0) {
+    // 1. Отрисовка радиуса поиска цели
+    if (debug.detectRadius !== undefined && debug.detectRadius > 0) {
       this.drawProjectedCircle(
         posX,
         posY,
         posZ,
-        detectRadius,
+        debug.detectRadius,
         AI_DEBUG_CONFIG.colors.detectRadius,
         AI_DEBUG_CONFIG.dashArrays.radii,
-        `Detect: ${detectRadius.toFixed(1)}m`,
+        `Detect: ${debug.detectRadius.toFixed(1)}m`,
         0
       );
     }
 
-    // 2. Отрисовка радиуса потери цели (Lose Target Radius)
-    if (loseRadius !== undefined && loseRadius > 0) {
+    // 2. Отрисовка радиуса потери цели
+    if (debug.loseRadius !== undefined && debug.loseRadius > 0) {
       this.drawProjectedCircle(
         posX,
         posY,
         posZ,
-        loseRadius,
+        debug.loseRadius,
         AI_DEBUG_CONFIG.colors.loseRadius,
         AI_DEBUG_CONFIG.dashArrays.radii,
-        `Lose: ${loseRadius.toFixed(1)}m`,
+        `Lose: ${debug.loseRadius.toFixed(1)}m`,
         Math.PI / 4
       );
     }
 
     const selfYOffset = posY + 0.8;
 
-    // 3. Линия к target_pos (если задано в памяти)
-    const targetPosVal =
-      bb?.get('target_pos') ??
-      bb?.get('targetPos') ??
-      bb?.get('target_position') ??
-      bb?.get('targetPosition');
+    // 3. Линия к targetPos
+    if (debug.targetPos) {
+      const { x: tX, y: tY, z: tZ } = debug.targetPos;
+      this.drawProjectedLine(
+        posX,
+        selfYOffset,
+        posZ,
+        tX,
+        tY,
+        tZ,
+        AI_DEBUG_CONFIG.colors.pathLine,
+        AI_DEBUG_CONFIG.dashArrays.path,
+        2
+      );
 
-    if (targetPosVal !== undefined && targetPosVal !== null) {
-      let targetX = 0,
-        targetY = 0,
-        targetZ = 0;
-      let hasTargetPos = false;
+      const proj = this._tempV1.set(tX, tY, tZ).project(this.camera);
+      if (proj.z <= 1.0) {
+        const sx = (proj.x * 0.5 + 0.5) * w;
+        const sy = (-(proj.y * 0.5) + 0.5) * h;
 
-      if (typeof targetPosVal === 'object') {
-        if (Array.isArray(targetPosVal)) {
-          if (targetPosVal.length >= 3) {
-            targetX = Number(targetPosVal[0]) || 0;
-            targetY = Number(targetPosVal[1]) || 0;
-            targetZ = Number(targetPosVal[2]) || 0;
-            hasTargetPos = true;
-          } else if (targetPosVal.length >= 2) {
-            targetX = Number(targetPosVal[0]) || 0;
-            targetY = 0.1;
-            targetZ = Number(targetPosVal[1]) || 0;
-            hasTargetPos = true;
-          }
-        } else if (
-          typeof targetPosVal === 'object' &&
-          targetPosVal !== null &&
-          'x' in targetPosVal
-        ) {
-          const posObj = targetPosVal as { x?: unknown; y?: unknown; z?: unknown };
-          targetX = Number(posObj.x) || 0;
-          if ('z' in posObj && posObj.z !== undefined) {
-            targetY = Number(posObj.y) || 0.1;
-            targetZ = Number(posObj.z) || 0;
-          } else {
-            targetY = 0.1;
-            targetZ = Number(posObj.y) || 0;
-          }
-          hasTargetPos = true;
-        }
-      }
+        this.uiCtx.save();
+        this.uiCtx.strokeStyle = AI_DEBUG_CONFIG.colors.pathLine;
+        this.uiCtx.fillStyle = AI_DEBUG_CONFIG.colors.pathLine;
+        this.uiCtx.lineWidth = 2;
+        this.uiCtx.beginPath();
+        this.uiCtx.arc(sx, sy, 4, 0, Math.PI * 2);
+        this.uiCtx.fill();
+        this.uiCtx.stroke();
+        this.uiCtx.restore();
 
-      if (hasTargetPos) {
-        this.drawProjectedLine(
-          posX,
-          selfYOffset,
-          posZ,
-          targetX,
-          targetY,
-          targetZ,
-          AI_DEBUG_CONFIG.colors.pathLine,
-          AI_DEBUG_CONFIG.dashArrays.path,
-          2
-        );
-
-        // Маркер точки target_pos
-        const proj = this._tempV1.set(targetX, targetY, targetZ).project(this.camera);
-        if (proj.z <= 1.0) {
-          const sx = (proj.x * 0.5 + 0.5) * w;
-          const sy = (-(proj.y * 0.5) + 0.5) * h;
-
-          this.uiCtx.save();
-          this.uiCtx.strokeStyle = AI_DEBUG_CONFIG.colors.pathLine;
-          this.uiCtx.fillStyle = AI_DEBUG_CONFIG.colors.pathLine;
-          this.uiCtx.lineWidth = 2;
-          this.uiCtx.beginPath();
-          this.uiCtx.arc(sx, sy, 4, 0, Math.PI * 2);
-          this.uiCtx.fill();
-          this.uiCtx.stroke();
-          this.uiCtx.restore();
-
-          this.renderBadge('target_pos', sx, sy - 12, AI_DEBUG_CONFIG.colors.pathLine, '#ffffff');
-        }
+        this.renderBadge('target_pos', sx, sy - 12, AI_DEBUG_CONFIG.colors.pathLine, '#ffffff');
       }
     }
 
-    // 4. Линия к targetId (если задано в памяти)
-    const targetIdVal = bb?.get('targetId') ?? bb?.get('target_id');
-    if (targetIdVal !== undefined && targetIdVal !== null && String(targetIdVal).trim() !== '') {
-      const targetIdStr = String(targetIdVal);
-      const targetEntity = world.getEntity(targetIdStr);
-      const targetOwnerRoot = getRootOwner(world, targetIdStr);
-      const targetTrans =
-        world.getComponent(targetIdStr, 'transform') ??
-        (targetOwnerRoot ? world.getComponent(targetOwnerRoot, 'transform') : undefined);
+    // 4. Линия к targetEntity
+    if (debug.targetEntity) {
+      const { x: tX, y: tY, z: tZ } = debug.targetEntity.pos;
+      this.drawProjectedLine(
+        posX,
+        selfYOffset,
+        posZ,
+        tX,
+        tY + 0.8,
+        tZ,
+        AI_DEBUG_CONFIG.colors.targetLine,
+        AI_DEBUG_CONFIG.dashArrays.targetLine,
+        2
+      );
 
-      if (targetTrans) {
-        const tX = targetTrans.x;
-        const tY = targetTrans.y + 0.8;
-        const tZ = targetTrans.z;
+      const proj = this._tempV1.set(tX, tY + 0.8, tZ).project(this.camera);
+      if (proj.z <= 1.0) {
+        const sx = (proj.x * 0.5 + 0.5) * w;
+        const sy = (-(proj.y * 0.5) + 0.5) * h;
 
-        this.drawProjectedLine(
-          posX,
-          selfYOffset,
-          posZ,
-          tX,
-          tY,
-          tZ,
+        this.renderBadge(
+          `Target: ${debug.targetEntity.name}`,
+          sx,
+          sy - 16,
           AI_DEBUG_CONFIG.colors.targetLine,
-          AI_DEBUG_CONFIG.dashArrays.targetLine,
-          2
+          '#ff8a80'
         );
-
-        const proj = this._tempV1.set(tX, tY, tZ).project(this.camera);
-        if (proj.z <= 1.0) {
-          const sx = (proj.x * 0.5 + 0.5) * w;
-          const sy = (-(proj.y * 0.5) + 0.5) * h;
-
-          const targetMeta =
-            targetEntity?.meta ??
-            (targetOwnerRoot ? world.getComponent(targetOwnerRoot, 'meta') : undefined);
-          const targetName = targetMeta?.name ?? targetIdStr;
-
-          this.renderBadge(
-            `Target: ${targetName}`,
-            sx,
-            sy - 16,
-            AI_DEBUG_CONFIG.colors.targetLine,
-            '#ff8a80'
-          );
-        }
       }
     }
   }

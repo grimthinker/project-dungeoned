@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import { IModelPreview } from './IModelPreview';
-import { World } from '../ecs/World';
+import { IModelPreview, PreviewPartAttachment } from './IModelPreview';
 import { AssetManager } from './AssetManager';
 import { CREATURE_RIG_PROFILES } from './rigProfiles';
 import { BodyStructureType } from '../ecs/templates';
@@ -79,8 +78,7 @@ export class ThreeModelPreview implements IModelPreview {
 
   public async loadRig(
     structureType: string,
-    assemblyPartIds?: string[],
-    world?: World
+    attachments?: PreviewPartAttachment[]
   ): Promise<void> {
     if (this.isDisposed) return;
     this.currentStructureType = structureType as BodyStructureType;
@@ -119,13 +117,12 @@ export class ThreeModelPreview implements IModelPreview {
       }
       this.modelGroup.add(rig);
 
-      if (rigProfile && assemblyPartIds && world) {
-        for (const partId of assemblyPartIds) {
-          const visual = world.getComponent(partId, 'visualModel');
-          if (visual?.modelId && visual?.rigNodeName) {
-            const targetNode = rig.getObjectByName(visual.rigNodeName);
+      if (rigProfile && attachments) {
+        for (const att of attachments) {
+          if (att.modelId && att.rigNodeName) {
+            const targetNode = rig.getObjectByName(att.rigNodeName);
             if (targetNode) {
-              const meshClone = await AssetManager.getInstance().getClonedModel(visual.modelId);
+              const meshClone = await AssetManager.getInstance().getClonedModel(att.modelId);
               if (this.isDisposed) return;
               if (meshClone) {
                 if (meshClone.type === 'Scene' || meshClone.type === 'Group') {

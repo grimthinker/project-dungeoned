@@ -1,6 +1,4 @@
 import * as THREE from 'three';
-import { World } from '../../ecs/World';
-import { EntityId, AnimatorComponent } from '../../ecs/types';
 import { BodyStructureType } from '../../ecs/templates';
 import { CREATURE_RIG_PROFILES } from '../rigProfiles';
 import { AssetManager } from '../AssetManager';
@@ -16,63 +14,68 @@ export interface RigAnimatorState {
   socketBones: Map<string, THREE.Object3D>;
 }
 
+export interface MeshAttachmentDesc {
+  partId: string;
+  modelId: string;
+  rigNodeName: string;
+}
+
+export interface ModularRigDesc {
+  rigType: BodyStructureType;
+  parts: MeshAttachmentDesc[];
+}
+
+export interface DetachedLimbDesc {
+  rigType: BodyStructureType;
+  rootPartSubType?: string;
+  parts: MeshAttachmentDesc[];
+}
+
 export class CreatureMeshAssembler {
   constructor(
     private scene: THREE.Scene,
     private matSilhouetteOutline: THREE.Material,
-    private loadingMeshes: Set<EntityId>,
-    private loadingGenerations: Map<EntityId, number>,
-    private onRegisterAnimator: (id: EntityId, state: RigAnimatorState) => void,
+    private loadingMeshes: Set<string>,
+    private loadingGenerations: Map<string, number>,
+    private onRegisterAnimator: (id: string, state: RigAnimatorState) => void,
     private onPlayDefaultAnimation: (
-      id: EntityId,
-      animatorComp: AnimatorComponent,
+      id: string,
+      rigType: BodyStructureType,
       animKey: string
-    ) => Promise<void>
+    ) => Promise<void>,
+    private isEntityActive: (id: string) => boolean
   ) {}
 
-  public canAssembleModularRig(world: World, id: EntityId, archetype?: string): boolean {
-    const animator = world.getComponent(id, 'animator');
-    if (!animator || archetype !== 'creature') return false;
-    const profile = CREATURE_RIG_PROFILES[animator.rigType as BodyStructureType];
+  public canAssembleModularRig(rigType?: string, archetype?: string): boolean {
+    if (!rigType || archetype !== 'creature') return false;
+    const profile = CREATURE_RIG_PROFILES[rigType as BodyStructureType];
     return Boolean(profile?.rigAsset);
   }
 
-  public createModularRig(world: World, id: EntityId): THREE.Group {
+  public createModularRig(id: string, desc: ModularRigDesc): THREE.Group {
     this.loadingMeshes.add(id);
     const group = new THREE.Group();
     group.userData.entityId = id;
     group.userData.isModularRig = true;
-    this.assembleModularRigAsync(id, group, world).catch(console.error);
+    this.assembleModularRigAsync(id, group, desc).catch(console.error);
     return group;
   }
 
-  public canAssembleDetachedLimb(world: World, id: EntityId, archetype?: string): boolean {
-    const assembly = world.getComponent(id, 'assemblyRoot');
-    return Boolean(assembly && (archetype === 'item' || archetype === 'bodyPart'));
-  }
-
-  public createDetachedLimb(world: World, id: EntityId): THREE.Group {
+  public createDetachedLimb(id: string, desc: DetachedLimbDesc): THREE.Group {
     this.loadingMeshes.add(id);
     const group = new THREE.Group();
     group.userData.entityId = id;
     group.userData.isDetachedLimb = true;
-    this.assembleDetachedLimbAsync(id, group, world).catch(console.error);
+    this.assembleDetachedLimbAsync(id, group, desc).catch(console.error);
     return group;
   }
 
   public async assembleModularRigAsync(
-    rootId: EntityId,
+    rootId: string,
     parentGroup: THREE.Group,
-    world: World
+    desc: ModularRigDesc
   ): Promise<void> {
-    const animator = world.getComponent(rootId, 'animator');
-    const assembly = world.getComponent(rootId, 'assemblyRoot');
-    if (!animator || !assembly) {
-      this.loadingMeshes.delete(rootId);
-      return;
-    }
-
-    const rigProfile = CREATURE_RIG_PROFILES[animator.rigType as BodyStructureType];
+    const rigProfile = CREATURE_RIG_PROFILES[desc.rigType];
     if (!rigProfile || !rigProfile.rigAsset) {
       this.loadingMeshes.delete(rootId);
       return;
@@ -82,7 +85,7 @@ export class CreatureMeshAssembler {
     this.loadingGenerations.set(rootId, currentGen);
 
     const isAborted = () =>
-      this.loadingGenerations.get(rootId) !== currentGen || !world.getEntity(rootId);
+      this.loadingGenerations.get(rootId) !== currentGen || !this.isEntityActive(rootId);
 
     try {
       const assetManager = AssetManager.getInstance();
@@ -117,33 +120,30 @@ export class CreatureMeshAssembler {
         socketBones,
       });
 
-      for (const partId of assembly.partIds) {
-        const visual = world.getComponent(partId, 'visualModel');
-        if (visual && visual.modelId && visual.rigNodeName) {
-          const targetNode = rig.getObjectByName(visual.rigNodeName);
-          if (targetNode) {
-            const meshClone = await assetManager.getClonedModel(visual.modelId);
+      for (const part of desc.parts) {
+        const targetNode = rig.getObjectByName(part.rigNodeName);
+        if (targetNode) {
+          const meshClone = await assetManager.getClonedModel(part.modelId);
 
-            if (isAborted()) {
-              if (meshClone) disposeObject(meshClone);
-              disposeObject(parentGroup);
-              this.scene.remove(parentGroup);
-              return;
-            }
+          if (isAborted()) {
+            if (meshClone) disposeObject(meshClone);
+            disposeObject(parentGroup);
+            this.scene.remove(parentGroup);
+            return;
+          }
 
-            if (meshClone) {
-              meshClone.userData.partId = partId;
-              meshClone.userData.entityId = partId;
-              meshClone.traverse((c) => {
-                c.userData.partId = partId;
-                c.userData.entityId = partId;
-              });
+          if (meshClone) {
+            meshClone.userData.partId = part.partId;
+            meshClone.userData.entityId = part.partId;
+            meshClone.traverse((c) => {
+              c.userData.partId = part.partId;
+              c.userData.entityId = part.partId;
+            });
 
-              if (meshClone.type === 'Scene' || meshClone.type === 'Group') {
-                targetNode.add(...meshClone.children);
-              } else {
-                targetNode.add(meshClone);
-              }
+            if (meshClone.type === 'Scene' || meshClone.type === 'Group') {
+              targetNode.add(...meshClone.children);
+            } else {
+              targetNode.add(meshClone);
             }
           }
         }
@@ -155,7 +155,7 @@ export class CreatureMeshAssembler {
       const visualCorrectionY = -box.min.y;
       rig.position.set(0, visualCorrectionY, 0);
 
-      this.onPlayDefaultAnimation(rootId, animator, 'stand_idle').catch(console.error);
+      this.onPlayDefaultAnimation(rootId, desc.rigType, 'stand_idle').catch(console.error);
     } catch (err) {
       console.error(`[CreatureMeshAssembler] Error assembling rig for ${rootId}:`, err);
     } finally {
@@ -166,31 +166,23 @@ export class CreatureMeshAssembler {
   }
 
   public async assembleDetachedLimbAsync(
-    rootId: EntityId,
+    rootId: string,
     parentGroup: THREE.Group,
-    world: World
+    desc: DetachedLimbDesc
   ): Promise<void> {
-    const assembly = world.getComponent(rootId, 'assemblyRoot');
-    const visual = world.getComponent(rootId, 'visualModel');
-    if (!assembly || !assembly.partIds || assembly.partIds.length === 0) {
-      this.loadingMeshes.delete(rootId);
-      return;
-    }
-
     const currentGen = (this.loadingGenerations.get(rootId) ?? 0) + 1;
     this.loadingGenerations.set(rootId, currentGen);
 
     const isAborted = () =>
-      this.loadingGenerations.get(rootId) !== currentGen || !world.getEntity(rootId);
+      this.loadingGenerations.get(rootId) !== currentGen || !this.isEntityActive(rootId);
 
     try {
       const assetManager = AssetManager.getInstance();
-      const rigStructure = (visual?.rigType as BodyStructureType) || 'humanoid';
-      const rigProfile = CREATURE_RIG_PROFILES[rigStructure] || CREATURE_RIG_PROFILES.humanoid;
+      const rigProfile = CREATURE_RIG_PROFILES[desc.rigType] || CREATURE_RIG_PROFILES.humanoid;
       const rigAsset = rigProfile?.rigAsset;
 
       if (!rigAsset) {
-        throw new Error(`Rig asset not found for structure: ${rigStructure}`);
+        throw new Error(`Rig asset not found for structure: ${desc.rigType}`);
       }
 
       const rig = await assetManager.getClonedModel(rigAsset);
@@ -212,38 +204,34 @@ export class CreatureMeshAssembler {
         }
       });
 
-      for (const partId of assembly.partIds) {
-        const partVisual = world.getComponent(partId, 'visualModel');
-        if (partVisual && partVisual.modelId && partVisual.rigNodeName) {
-          const targetNode = rig.getObjectByName(partVisual.rigNodeName);
-          if (targetNode) {
-            const meshClone = await assetManager.getClonedModel(partVisual.modelId);
+      for (const part of desc.parts) {
+        const targetNode = rig.getObjectByName(part.rigNodeName);
+        if (targetNode) {
+          const meshClone = await assetManager.getClonedModel(part.modelId);
 
-            if (isAborted()) {
-              if (meshClone) disposeObject(meshClone);
-              disposeObject(rig);
-              disposeObject(parentGroup);
-              this.scene.remove(parentGroup);
-              return;
-            }
+          if (isAborted()) {
+            if (meshClone) disposeObject(meshClone);
+            disposeObject(parentGroup);
+            this.scene.remove(parentGroup);
+            return;
+          }
 
-            if (meshClone) {
-              meshClone.userData.entityId = rootId;
-              delete meshClone.userData.partId;
+          if (meshClone) {
+            meshClone.userData.entityId = rootId;
+            delete meshClone.userData.partId;
 
-              meshClone.traverse((c) => {
-                c.userData.entityId = rootId;
-                delete c.userData.partId;
-              });
+            meshClone.traverse((c) => {
+              c.userData.entityId = rootId;
+              delete c.userData.partId;
+            });
 
-              const childrenToAttach = [...meshClone.children];
-              if (childrenToAttach.length > 0) {
-                for (const child of childrenToAttach) {
-                  targetNode.add(child);
-                }
-              } else {
-                targetNode.add(meshClone);
+            const childrenToAttach = [...meshClone.children];
+            if (childrenToAttach.length > 0) {
+              for (const child of childrenToAttach) {
+                targetNode.add(child);
               }
+            } else {
+              targetNode.add(meshClone);
             }
           }
         }
@@ -259,11 +247,10 @@ export class CreatureMeshAssembler {
 
       parentGroup.add(rig);
 
-      const anchorPartId = assembly.rootPartId;
-      const anchorTag = world.getComponent(anchorPartId, 'tag');
-      const subType = anchorTag?.subType;
-
-      parentGroup.userData.gripTransform = computeDetachedLimbGrip(parentGroup, subType);
+      parentGroup.userData.gripTransform = computeDetachedLimbGrip(
+        parentGroup,
+        desc.rootPartSubType
+      );
 
       attachOutlines(parentGroup, this.matSilhouetteOutline);
     } catch (err) {

@@ -21,15 +21,14 @@ export const DOMAINS = {
     'src/utils.ts',
   ],
 
-  // 3. Рендеринг, Three.js и окружение
+  // 3. Рендеринг, Three.js и окружение (Чистый графический домен)
   rendering: [
     'src/rendering/**/*',
-    'src/ecs/systems/ThreeSyncSystem.ts',
-    'src/ecs/components/rendering.ts',
     'src/config/graphicsConfig.ts',
     'src/config/grassConfig.ts',
     'src/config/cameraConfig.ts',
     'src/config/terrainConfig.ts',
+    'src/config/visualConfig.ts',
     'src/types.ts',
     'src/utils.ts',
   ],

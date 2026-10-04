@@ -1,10 +1,12 @@
 import * as THREE from 'three';
-import { World } from '../../ecs/World';
-import { EntityId } from '../../ecs/types';
 import { RigAnimatorState } from './CreatureMeshAssembler';
-import { getAggregatedInteractionSlots } from '../../ecs/utils/hierarchy';
 import { GripTransform } from '../gripCalculators';
 import { disposeObject } from '../renderUtils';
+
+export interface SocketItemBinding {
+  rigSocketName: string;
+  itemId: string | null;
+}
 
 export class RigSocketBinder {
   /**
@@ -12,25 +14,24 @@ export class RigSocketBinder {
    * к костям сокетов скелетного рига существа (LeftHandSocket, RightHandSocket, JawsSocket и др.)
    */
   public syncCreatureSockets(
-    creatureId: EntityId,
+    creatureId: string,
     animState: RigAnimatorState,
-    world: World,
-    meshes: Map<EntityId, THREE.Object3D>,
-    scene: THREE.Scene
+    bindings: SocketItemBinding[],
+    meshes: Map<string, THREE.Object3D>,
+    scene: THREE.Scene,
+    isEntityActive?: (id: string) => boolean
   ): void {
-    const aggSlots = getAggregatedInteractionSlots(world, creatureId);
-
-    for (const info of aggSlots) {
-      if (!info.slot.rigSocketName) continue;
+    for (const info of bindings) {
+      if (!info.rigSocketName) continue;
 
       const socketBone =
-        animState.socketBones.get(info.slot.rigSocketName) ||
-        animState.rig.getObjectByName(info.slot.rigSocketName);
+        animState.socketBones.get(info.rigSocketName) ||
+        animState.rig.getObjectByName(info.rigSocketName);
 
       if (!socketBone) continue;
 
-      if (info.slot.itemId) {
-        const itemObj = meshes.get(info.slot.itemId);
+      if (info.itemId) {
+        const itemObj = meshes.get(info.itemId);
 
         // Удаляем из кости все посторонние меши (если предмет был заменен или сброшен)
         for (let c = socketBone.children.length - 1; c >= 0; c--) {
@@ -38,7 +39,7 @@ export class RigSocketBinder {
           if (child !== itemObj) {
             socketBone.remove(child);
             const entId = child.userData.entityId;
-            if (entId && world.hasEntity(entId)) {
+            if (entId && isEntityActive?.(entId)) {
               scene.add(child);
             } else {
               disposeObject(child);
@@ -64,7 +65,7 @@ export class RigSocketBinder {
           const child = socketBone.children[0];
           socketBone.remove(child);
           const entId = child.userData.entityId;
-          if (entId && world.hasEntity(entId)) {
+          if (entId && isEntityActive?.(entId)) {
             scene.add(child);
           } else {
             disposeObject(child);

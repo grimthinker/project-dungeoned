@@ -1,12 +1,10 @@
 import * as THREE from 'three';
-import { World } from '../../ecs/World';
-import { getTerrainHeightAt, TerrainComponent } from '../../ecs/components/terrain';
+import { TerrainComponent } from '../../ecs/components/terrain';
 import { GrassGeometryBuilder } from './GrassGeometryBuilder';
 import { createGrassMaterial } from './GrassMaterial';
 import { GRASS_CONFIG } from '../../config/grassConfig';
 import { TERRAIN_CONFIG } from '../../config/terrainConfig';
 import { TrampleStamp, TrampleTextureManager } from './TrampleTextureManager';
-import { IPhysicsDriver } from '../../physics/IPhysicsDriver';
 import { GrassChunk } from './GrassChunk';
 
 export type FoliageVariant =
@@ -67,8 +65,7 @@ export class GrassSyncSystem {
 
   public update(
     dt: number,
-    world: World,
-    physicsDriver?: IPhysicsDriver | null,
+    trampleStamps: TrampleStamp[],
     terrainComp?: TerrainComponent,
     camX: number = 0,
     camZ: number = 0
@@ -87,8 +84,7 @@ export class GrassSyncSystem {
     }
 
     if (this.renderer) {
-      const stamps = this.collectTrampleStamps(world, terrainComp);
-      this.trampleManager.update(this.renderer, dt, stamps, camX, camZ);
+      this.trampleManager.update(this.renderer, dt, trampleStamps, camX, camZ);
 
       if (shader) {
         if (shader.uniforms.uTrampleMap)
@@ -132,10 +128,10 @@ export class GrassSyncSystem {
         let chunk = this.chunks.get(chunkId);
         if (!chunk) {
           chunk = new GrassChunk(chunkId, cx, cz, this.scene, this.grassMaterial, this.geometries);
-          chunk.build(terrainComp, world, physicsDriver ?? null, this.densityFactor);
+          chunk.build(terrainComp, this.densityFactor);
           this.chunks.set(chunkId, chunk);
         } else if (mustRebuild) {
-          chunk.build(terrainComp, world, physicsDriver ?? null, this.densityFactor);
+          chunk.build(terrainComp, this.densityFactor);
         }
       }
     }
@@ -151,120 +147,6 @@ export class GrassSyncSystem {
         this.chunks.delete(id);
       }
     }
-  }
-
-  private collectTrampleStamps(world: World, terrainComp?: TerrainComponent): TrampleStamp[] {
-    const stamps: TrampleStamp[] = [];
-
-    const isNearGround = (y: number, x: number, z: number): boolean => {
-      let groundY = 0;
-      if (terrainComp) {
-        const h = getTerrainHeightAt(terrainComp, x, z);
-        if (h !== null) groundY = h;
-      }
-      return y - groundY < 0.6; // Трава приминается только если объект не выше 60 см над землей
-    };
-
-    // 1. Игрок
-    const entities = world.getEntitiesWith('transform', 'aiStats', 'health');
-    for (const [id, { transform, aiStats, health }] of entities) {
-      if (health.isAlive && aiStats.behavior.current === 'PlayerTree') {
-        if (!isNearGround(transform.y, transform.x, transform.z)) continue;
-
-        const physStats = world.getComponent(id, 'physicsStats');
-        const vel = world.getComponent(id, 'velocity');
-        const speed = Math.hypot(vel?.vx ?? 0, vel?.vz ?? 0);
-        const isMoving = speed > 0.1;
-
-        const dirX = isMoving ? vel!.vx / speed : 0;
-        const dirZ = isMoving ? vel!.vz / speed : 0;
-
-        const baseRadius = physStats?.radius.current ?? 0.4;
-        const stampRadius = baseRadius + (isMoving ? 0.35 : 0.22);
-
-        stamps.push({
-          x: transform.x,
-          z: transform.z,
-          radius: stampRadius,
-          dirX,
-          dirZ,
-          strength: 1.0,
-        });
-        break;
-      }
-    }
-
-    // 2. Другие существа (включая собак)
-    const creatures = world.getEntitiesWith('transform', 'health', 'meta');
-    for (const [id, { transform, health, meta }] of creatures) {
-      if (meta.entityType === 'creature' && health.isAlive) {
-        if (!isNearGround(transform.y, transform.x, transform.z)) continue;
-
-        const ai = world.getComponent(id, 'aiStats');
-        if (ai?.behavior.current === 'PlayerTree') continue;
-
-        const physStats = world.getComponent(id, 'physicsStats');
-        const vel = world.getComponent(id, 'velocity');
-        const speed = Math.hypot(vel?.vx ?? 0, vel?.vz ?? 0);
-        const isMoving = speed > 0.1;
-
-        const dirX = isMoving ? vel!.vx / speed : 0;
-        const dirZ = isMoving ? vel!.vz / speed : 0;
-
-        const baseRadius = physStats?.radius.current ?? 0.4;
-        const stampRadius = baseRadius + (isMoving ? 0.3 : 0.2);
-
-        stamps.push({
-          x: transform.x,
-          z: transform.z,
-          radius: stampRadius,
-          dirX,
-          dirZ,
-          strength: 0.95,
-        });
-      }
-    }
-
-    // 3. Предметы (брошенные, летящие или катящиеся мячи/палки)
-    const items = world.getEntitiesWith('transform', 'item');
-    for (const [id, { transform, item }] of items) {
-      if (world.getComponent(id, 'ownership')) continue;
-
-      const physStats = world.getComponent(id, 'physicsStats');
-      const itemRadius = physStats?.radius.current ?? 0.3;
-
-      // Для предметов проверяем высоту с учетом их радиуса (так как у них origin в центре)
-      if (!isNearGround(transform.y - itemRadius, transform.x, transform.z)) continue;
-
-      const thrown = world.getComponent(id, 'thrownObject');
-      const vel = world.getComponent(id, 'velocity');
-
-      const weight = physStats?.weight.current ?? 1;
-      const size = item.size ?? 1;
-      const speed = Math.hypot(vel?.vx ?? 0, vel?.vz ?? 0);
-
-      const isMoving = vel && (speed > 0.3 || Math.abs(vel.vy) > 0.3);
-      const isAirborne = thrown?.isAirborne;
-
-      if (size >= 4 || weight >= 2 || isAirborne || isMoving) {
-        const itemRadius = physStats?.radius.current ?? 0.3;
-        const isDirMoving = speed > 0.05;
-        const dirX = isDirMoving ? vel!.vx / speed : 0;
-        const dirZ = isDirMoving ? vel!.vz / speed : 0;
-        const stampRadius = itemRadius + (isMoving || isAirborne ? 0.25 : 0.15);
-
-        stamps.push({
-          x: transform.x,
-          z: transform.z,
-          radius: stampRadius,
-          dirX,
-          dirZ,
-          strength: Math.min(1.0, 0.4 + weight * 0.1),
-        });
-      }
-    }
-
-    return stamps;
   }
 
   public clear(): void {

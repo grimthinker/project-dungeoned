@@ -99,6 +99,18 @@ export function calculateBoundingRadius(points: Point[]): number {
   return Math.sqrt(maxSq);
 }
 
+export interface EnvironmentData {
+  timeOfDay: number;
+  dayDuration: number;
+  azimuth: number;
+  axialTilt: number;
+  fogDensity: number;
+  ambientIntensity?: number;
+  sunIntensityMultiplier?: number;
+  hemiSkyColor?: string;
+  hemiGroundColor?: string;
+}
+
 /**
  * Вычисляет баллистический вектор скорости для броска в цель.
  * Использует аналитическую формулу угла минимальной энергии.
