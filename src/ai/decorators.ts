@@ -1,4 +1,4 @@
-import { EntityAdapter } from '../EntityAdapter';
+import type { IAIAgent } from './ports';
 import { vec2_distance_to } from '../utils';
 import { BTDecorator, BTNode, NodeStatus } from './core';
 
@@ -7,14 +7,14 @@ export abstract class BTCondition extends BTDecorator {
   public static readonly description =
     'Если условие не выполняется, возвращает FAILURE, иначе передает управление дочернему узлу';
 
-  private condition: (ctx: EntityAdapter) => boolean;
+  private condition: (ctx: IAIAgent) => boolean;
 
-  constructor(condition: (ctx: EntityAdapter) => boolean, child: BTNode) {
+  constructor(condition: (ctx: IAIAgent) => boolean, child: BTNode) {
     super(child);
     this.condition = condition;
   }
 
-  protected onTick(ctx: EntityAdapter): NodeStatus {
+  protected onTick(ctx: IAIAgent): NodeStatus {
     if (!this.condition(ctx)) {
       if (this.child.isRunning()) {
         this.child.abort(ctx);
@@ -33,7 +33,7 @@ export class BTInverter extends BTDecorator {
     super(child);
   }
 
-  protected onTick(ctx: EntityAdapter): NodeStatus {
+  protected onTick(ctx: IAIAgent): NodeStatus {
     const status = this.child.tick(ctx);
 
     if (status === NodeStatus.SUCCESS) {
@@ -55,7 +55,7 @@ export class BTRetry extends BTDecorator {
     super(child);
   }
 
-  protected onTick(ctx: EntityAdapter): NodeStatus {
+  protected onTick(ctx: IAIAgent): NodeStatus {
     const status = this.child.tick(ctx);
 
     if (status === NodeStatus.FAILURE) {
@@ -80,8 +80,8 @@ export class BTCooldown extends BTDecorator {
     this.params = { ...BTCooldown.defaultParams, ...params };
   }
 
-  protected onTick(ctx: EntityAdapter): NodeStatus {
-    const currentTime = (ctx.brain!.blackboard.get('localTime') ?? 0) * 1000;
+  protected onTick(ctx: IAIAgent): NodeStatus {
+    const currentTime = (ctx.blackboard.get<number>('localTime') ?? 0) * 1000;
 
     if (currentTime - this.lastExecutionTime < this.params.cooldownMs) {
       return NodeStatus.FAILURE;
@@ -106,7 +106,7 @@ export class BTRepeater extends BTDecorator {
     super(child);
   }
 
-  protected onTick(ctx: EntityAdapter): NodeStatus {
+  protected onTick(ctx: IAIAgent): NodeStatus {
     const status = this.child.tick(ctx);
 
     if (status === NodeStatus.SUCCESS || status === NodeStatus.FAILURE) {
@@ -130,15 +130,15 @@ export class BTDecoratorCheckEngaged extends BTDecorator {
     this.params = { ...BTDecoratorCheckEngaged.defaultParams, ...params };
   }
 
-  protected onTick(ctx: EntityAdapter): NodeStatus {
-    const bb = ctx.brain!.blackboard;
-    const targetId = bb.get('targetId');
+  protected onTick(ctx: IAIAgent): NodeStatus {
+    const bb = ctx.blackboard;
+    const targetId = bb.get<string>('targetId');
 
     if (targetId === undefined) return NodeStatus.FAILURE;
 
-    const target = ctx.utils.getEntity(targetId);
+    const target = ctx.world.getAgent(targetId);
 
-    if (!target?.getPos()) return NodeStatus.FAILURE;
+    if (!target) return NodeStatus.FAILURE;
 
     const dist = vec2_distance_to(ctx.getPos(), target.getPos());
     const isEngaged = dist <= this.params.engageDist;
@@ -163,14 +163,14 @@ export class BTDecoratorIsTargetAlive extends BTDecorator {
     super(child);
   }
 
-  protected onTick(ctx: EntityAdapter): NodeStatus {
-    const targetId = ctx.brain!.blackboard.get('targetId');
+  protected onTick(ctx: IAIAgent): NodeStatus {
+    const targetId = ctx.blackboard.get<string>('targetId');
     if (targetId === undefined) {
       if (this.child.isRunning()) this.child.abort(ctx);
       return NodeStatus.FAILURE;
     }
 
-    const target = ctx.utils.getEntity(targetId);
+    const target = ctx.world.getAgent(targetId);
     if (!target || !target.isAlive) {
       if (this.child.isRunning()) {
         this.child.abort(ctx);

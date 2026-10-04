@@ -1,15 +1,9 @@
-import { AIEventType, EntityUtils } from './core';
-import type { EntityAdapter } from '../EntityAdapter';
+import { AIEventType } from './core';
+import type { IAIAgent, IAIWorld } from './ports';
 
-export function createBTAISystem(utils: EntityUtils) {
-  function updateContext(ctx: EntityAdapter, data: { dt: number }) {
-    ctx.dt = data.dt;
-    ctx.utils = utils; // Ensure utils reference is available on context
-  }
-
-  function processEvents(ctx: EntityAdapter) {
-    const queue = ctx.brain?.event_queue;
-    const bb = ctx.brain?.blackboard;
+export function createBTAISystem(world: IAIWorld) {
+  function processEvents(agent: IAIAgent, queue: any[]) {
+    const bb = agent.blackboard;
     if (!queue || !bb) return;
 
     while (queue.length > 0) {
@@ -32,21 +26,24 @@ export function createBTAISystem(utils: EntityUtils) {
     }
   }
 
-  function update(dt: number) {
-    const entities = utils.getAllEntities();
-    for (const ctx of entities) {
-      const ts = ctx.timeScaleMultiplier;
-      const localDt = dt * ts;
+  function update(_dt: number) {
+    const agents = world.getAllAgents();
 
-      const bb = ctx.brain?.blackboard;
+    for (const agent of agents) {
+      const bb = agent.blackboard;
       if (bb) {
         const currentLocalTime = (bb.get('localTime') as number) ?? 0;
-        bb.set('localTime', currentLocalTime + localDt);
+        bb.set('localTime', currentLocalTime + agent.dt);
       }
 
-      updateContext(ctx, { dt: localDt });
-      processEvents(ctx);
-      ctx.brain?.root_node.tick(ctx);
+      // Получаем нативные события (хранятся под капотом в ECS)
+      const rawQueue = (agent as any).getEventQueue ? (agent as any).getEventQueue() : [];
+      processEvents(agent, rawQueue);
+
+      const brain = (agent as any).brain;
+      if (brain) {
+        brain.root_node.tick(agent);
+      }
     }
   }
 

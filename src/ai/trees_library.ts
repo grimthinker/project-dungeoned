@@ -244,7 +244,12 @@ export function MasterFetchTree(): BTNode {
               new BTActionSetTarget({ sourceKey: 'nearestDeliveredStickId' }),
               new BTServicePathUpdater(
                 new BTSequence([
-                  new BTActionPursue({ stopDist: 0.6, sprintMinDistance: undefined }),
+                  new BTActionPursue({
+                    stopDist: 0.6,
+                    walkDistance: 3.0,
+                    sprintMinDistance: 8.0,
+                    hysteresis: 1.0,
+                  }),
                   new BTActionPickup({ targetKey: 'nearestDeliveredStickId' }),
                 ])
               ),
@@ -279,7 +284,12 @@ export function MasterFetchTree(): BTNode {
               new BTConditionMasterShouldFollowDog(),
               new BTActionSetTarget({ sourceKey: 'priorityDogId' }),
               new BTServicePathUpdater(
-                new BTActionPursue({ stopDist: 5.0, sprintMinDistance: undefined })
+                new BTActionPursue({
+                  stopDist: 5.0,
+                  walkDistance: 6.0,
+                  sprintMinDistance: 14.0,
+                  hysteresis: 1.0,
+                })
               ),
             ]),
 

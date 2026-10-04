@@ -1,7 +1,6 @@
 import { Point, Vec3 } from '../types';
 import { BehaviorTreeId, MobTypeId } from './config';
-import type { EntityAdapter } from '../EntityAdapter'; // Import EntityAdapter as Context
-import { StandardRadius } from '../ecs/types';
+import type { IAIAgent } from './ports';
 
 export enum NodeStatus {
   IDLE = 'IDLE',
@@ -33,12 +32,6 @@ export interface BTNodeDTO {
   children: BTNodeDTO[];
 }
 
-export interface EntityUtils {
-  getAllEntities: () => EntityAdapter[];
-  getEntity: (id: string) => EntityAdapter | undefined;
-  getPath: (start: Vec3, end: Vec3, navmesh_radius_type?: number) => Promise<Vec3[]>;
-}
-
 export type AttackStatus = 'idle' | 'attacking' | 'cooldown';
 
 import { NodeBBSchema } from './schema';
@@ -65,12 +58,12 @@ export abstract class BTNode {
   public lastResultTime: number = 0;
   protected isOpen: boolean = false;
 
-  protected onOpen(ctx: EntityAdapter): void {}
-  protected abstract onTick(ctx: EntityAdapter): NodeStatus;
-  protected onClose(ctx: EntityAdapter): void {}
-  protected onAbort(ctx: EntityAdapter): void {}
+  protected onOpen(ctx: IAIAgent): void {}
+  protected abstract onTick(ctx: IAIAgent): NodeStatus;
+  protected onClose(ctx: IAIAgent): void {}
+  protected onAbort(ctx: IAIAgent): void {}
 
-  public tick(ctx: EntityAdapter): NodeStatus {
+  public tick(ctx: IAIAgent): NodeStatus {
     if (!this.isOpen) {
       this.onOpen(ctx);
       this.isOpen = true;
@@ -91,7 +84,7 @@ export abstract class BTNode {
     return status;
   }
 
-  public abort(ctx: EntityAdapter): void {
+  public abort(ctx: IAIAgent): void {
     if (this.isOpen) {
       this.onAbort(ctx);
       this.isOpen = false;
@@ -111,15 +104,15 @@ export abstract class BTSimpleAction extends BTNode {
 export abstract class BTAction extends BTNode {
   public static readonly category: NodeCategory = 'action';
 
-  protected onAbort(ctx: EntityAdapter): void {
+  protected onAbort(ctx: IAIAgent): void {
     this.stopAction(ctx);
   }
 
-  protected onClose(ctx: EntityAdapter): void {
+  protected onClose(ctx: IAIAgent): void {
     this.stopAction(ctx);
   }
 
-  protected abstract stopAction(ctx: EntityAdapter): void;
+  protected abstract stopAction(ctx: IAIAgent): void;
 }
 
 export abstract class BTDecorator extends BTNode {
@@ -129,7 +122,7 @@ export abstract class BTDecorator extends BTNode {
     super();
   }
 
-  public override abort(ctx: EntityAdapter): void {
+  public override abort(ctx: IAIAgent): void {
     if (this.child.isRunning()) {
       this.child.abort(ctx);
     }
@@ -144,7 +137,7 @@ export abstract class BTComposite extends BTNode {
     super();
   }
 
-  public override abort(ctx: EntityAdapter): void {
+  public override abort(ctx: IAIAgent): void {
     for (const child of this.children) {
       if (child.isRunning()) {
         child.abort(ctx);
@@ -166,7 +159,7 @@ export abstract class BTService extends BTDecorator {
     this.params = { ...BTService.defaultParams, ...params };
   }
 
-  protected override onTick(ctx: EntityAdapter): NodeStatus {
+  protected override onTick(ctx: IAIAgent): NodeStatus {
     this.timeSinceLastTick += ctx.dt;
     if (this.timeSinceLastTick >= this.params.interval) {
       this.tickService(ctx);
@@ -183,7 +176,7 @@ export abstract class BTService extends BTDecorator {
     return this.params.interval - this.timeSinceLastTick;
   }
 
-  protected abstract tickService(ctx: EntityAdapter): void;
+  protected abstract tickService(ctx: IAIAgent): void;
 }
 
 export enum AIEventType {

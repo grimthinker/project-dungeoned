@@ -1,8 +1,6 @@
-// bundle.config.ts
-
 export const DOMAINS = {
   // 1. Искусственный интеллект и логика поведений (BT)
-  ai: ['src/ai/**/*', 'src/EntityAdapter.ts'],
+  ai: ['src/ai/**/*'],
 
   // 2. Боевая система, анатомия и статы
   combat: [
@@ -30,7 +28,7 @@ export const DOMAINS = {
   ],
 
   // 5. UI, HUD и Инспектор
-  ui: ['src/components/**/*', 'src/hooks/**/*', 'src/editor/**/*'],
+  ui: ['src/components/**/*', 'src/hooks/**/*', 'src/editor/**/*', 'src/core/contexts.ts'],
 
   // Полная сборка (на случай глобальных задач)
   all: ['src/**/*.{ts,tsx}'],

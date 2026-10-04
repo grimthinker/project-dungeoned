@@ -1,4 +1,4 @@
-import { EntityAdapter } from '../EntityAdapter';
+import type { IAIAgent } from './ports';
 import { BTComposite, NodeStatus, BTNode } from './core';
 
 export class BTSequence extends BTComposite {
@@ -11,11 +11,11 @@ export class BTSequence extends BTComposite {
     super(children);
   }
 
-  protected onOpen(ctx: EntityAdapter): void {
+  protected onOpen(ctx: IAIAgent): void {
     this.currentChildIndex = 0;
   }
 
-  protected onTick(ctx: EntityAdapter): NodeStatus {
+  protected onTick(ctx: IAIAgent): NodeStatus {
     for (let i = this.currentChildIndex; i < this.children.length; i++) {
       const status = this.children[i].tick(ctx);
 
@@ -31,14 +31,14 @@ export class BTSequence extends BTComposite {
     return NodeStatus.SUCCESS;
   }
 
-  protected onAbort(ctx: EntityAdapter): void {
+  protected onAbort(ctx: IAIAgent): void {
     const activeChild = this.children[this.currentChildIndex];
     if (activeChild && activeChild.isRunning()) {
       activeChild.abort(ctx);
     }
   }
 
-  protected onClose(ctx: EntityAdapter): void {
+  protected onClose(ctx: IAIAgent): void {
     this.currentChildIndex = 0;
   }
 }
@@ -53,11 +53,11 @@ export class BTSelector extends BTComposite {
     super(children);
   }
 
-  protected onOpen(ctx: EntityAdapter): void {
+  protected onOpen(ctx: IAIAgent): void {
     this.currentChildIndex = 0;
   }
 
-  protected onTick(ctx: EntityAdapter): NodeStatus {
+  protected onTick(ctx: IAIAgent): NodeStatus {
     for (let i = this.currentChildIndex; i < this.children.length; i++) {
       const status = this.children[i].tick(ctx);
 
@@ -74,7 +74,7 @@ export class BTSelector extends BTComposite {
     return NodeStatus.FAILURE;
   }
 
-  protected onAbort(ctx: EntityAdapter): void {
+  protected onAbort(ctx: IAIAgent): void {
     const activeChild = this.children[this.currentChildIndex];
     if (activeChild && activeChild.isRunning()) {
       activeChild.abort(ctx);
@@ -82,7 +82,7 @@ export class BTSelector extends BTComposite {
     this.currentChildIndex = 0;
   }
 
-  protected onClose(ctx: EntityAdapter): void {
+  protected onClose(ctx: IAIAgent): void {
     this.currentChildIndex = 0;
   }
 }
@@ -97,11 +97,11 @@ export class BTReactiveSelector extends BTComposite {
     super(children);
   }
 
-  protected onOpen(_ctx: EntityAdapter): void {
+  protected onOpen(_ctx: IAIAgent): void {
     this.currentChildIndex = 0;
   }
 
-  protected onTick(ctx: EntityAdapter): NodeStatus {
+  protected onTick(ctx: IAIAgent): NodeStatus {
     for (let i = 0; i < this.children.length; i++) {
       const status = this.children[i].tick(ctx);
 
@@ -132,7 +132,7 @@ export class BTReactiveSelector extends BTComposite {
     return NodeStatus.FAILURE;
   }
 
-  protected onAbort(ctx: EntityAdapter): void {
+  protected onAbort(ctx: IAIAgent): void {
     const activeChild = this.children[this.currentChildIndex];
     if (activeChild && activeChild.isRunning()) {
       activeChild.abort(ctx);
@@ -140,7 +140,7 @@ export class BTReactiveSelector extends BTComposite {
     this.currentChildIndex = 0;
   }
 
-  protected onClose(_ctx: EntityAdapter): void {
+  protected onClose(_ctx: IAIAgent): void {
     this.currentChildIndex = 0;
   }
 }

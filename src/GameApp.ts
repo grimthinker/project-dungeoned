@@ -3,7 +3,7 @@ import { ThreeRenderer } from './rendering/ThreeRenderer';
 import { IRenderer } from './rendering/IRenderer';
 import { Point, Vec3 } from './types';
 import { GameMode } from './config/gameConfig';
-import { SerializedWorldData } from './ecs/WorldSerializer';
+import { SerializedEntityData, SerializedWorldData } from './ecs/WorldSerializer';
 import { EntityConfig } from './ecs/types';
 import { EventBus } from './core/EventBus';
 import { serializeBTNode } from './ai/serializer';
@@ -17,10 +17,12 @@ import { EditorInteractionManager } from './editor/EditorInteractionManager';
 import { PhysicalRaycastResult } from './physics/IPhysicsDriver';
 import { calculateThrowVelocity } from './utils';
 import { FPSMonitor } from './core/FPSMonitor';
+import { IEditorContext } from './core/contexts';
+import { ICommand } from './history/ICommand';
 
 export { EntityAdapter } from './EntityAdapter';
 
-export class GameApp {
+export class GameApp implements IEditorContext {
   private container: HTMLDivElement;
   public renderer: IRenderer;
   public camera: Camera;
@@ -311,6 +313,25 @@ export class GameApp {
   }
   public deserializeWorld(data: SerializedWorldData | Record<string, any>): void {
     this.simulation.deserializeWorld(data);
+  }
+  public serializeEntities(ids: string[]): SerializedEntityData[] {
+    return this.serializer.serializeEntities(ids);
+  }
+  public deserializeEntities(entitiesData: SerializedEntityData[]): void {
+    this.serializer.deserializeEntities(entitiesData);
+  }
+  public removeEntityDirectly(id: string): void {
+    if (this.world.getEntity(id)) {
+      const phys = this.world.getComponent(id, 'physicsBody');
+      if (phys && phys.rawBody) {
+        this.physicsDriver?.removeRigidBody(phys.rawBody);
+      }
+      this.world.removeEntity(id);
+      this.aiSystem.unregisterEntity(id);
+    }
+  }
+  public pushCommand(command: ICommand): void {
+    this.commandHistory.push(command);
   }
   public clearPlayerAim(): void {
     this.simulation.clearPlayerAim();

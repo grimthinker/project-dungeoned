@@ -1,4 +1,5 @@
 import { World } from '../World';
+import { getRootOwner } from '../utils/hierarchy';
 
 export class FetchGameplaySystem {
   public update(_dt: number, world: World): void {
@@ -9,12 +10,13 @@ export class FetchGameplaySystem {
       const thrownObject = world.getComponent(id, 'thrownObject');
 
       if (ownership) {
+        const rootOwnerId = getRootOwner(world, ownership.ownerId);
         // Предмет удерживается кем-то в руках или пасти
-        if (ownership.ownerId === fetchStick.ownerMasterId) {
+        if (rootOwnerId === fetchStick.ownerMasterId) {
           fetchStick.state = 'held_by_master';
         } else {
           fetchStick.state = 'held_by_dog';
-          fetchStick.lastCarrierDogId = ownership.ownerId;
+          fetchStick.lastCarrierDogId = rootOwnerId;
         }
       } else {
         // Предмет находится на земле или летит в воздухе

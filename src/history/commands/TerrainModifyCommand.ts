@@ -1,10 +1,10 @@
 import { ICommand } from '../ICommand';
-import type { GameApp } from '../../GameApp';
+import { ICommandContext } from '../../core/contexts';
 
 export class TerrainModifyCommand implements ICommand {
   constructor(
     public readonly description: string,
-    private app: GameApp,
+    private ctx: ICommandContext,
     private entityId: string,
     private beforeHeights: Float32Array,
     private afterHeights: Float32Array,
@@ -23,7 +23,7 @@ export class TerrainModifyCommand implements ICommand {
   }
 
   private applyState(heights: Float32Array, splatData: Uint8Array, foliageData?: Uint8Array): void {
-    const comp = this.app.world.getComponent(this.entityId, 'terrain');
+    const comp = this.ctx.world.getComponent(this.entityId, 'terrain');
     if (comp) {
       comp.heights.set(heights);
       comp.splatData.set(splatData);
@@ -43,7 +43,7 @@ export class TerrainModifyCommand implements ICommand {
       comp.geometryVersion = (comp.geometryVersion ?? 0) + 1;
       comp.splatVersion = (comp.splatVersion ?? 0) + 1;
 
-      this.app.syncPhysicsStructures();
+      this.ctx.syncPhysicsStructures();
     }
   }
 }

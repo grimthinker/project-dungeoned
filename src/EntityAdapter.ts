@@ -1,252 +1,238 @@
 import { World } from './ecs/World';
-import {
-  EntityId,
-  ItemData,
-  OwnershipComponent,
-  EquipmentComponent,
-  InteractionSlotsComponent,
-  InteractionPhase,
-  InteractionActionComponent,
-  CreatureMovementMode,
-  CreatureDirectionMode,
-  CreatureActionMode,
-  InventoryComponent,
-  InputComponent,
-  TransformComponent,
-  HealthComponent,
-  VelocityComponent,
-  MovementStatsComponent,
-  StealthStatsComponent,
-  PhysicsStatsComponent,
-  PerceptionComponent,
-  ActiveAttackComponent,
-  WeaponStatsComponent,
-  HitZoneConfig,
-  ArmorStatsComponent,
-  BaseCreatureStance,
-  CreatureStance,
-  HeadOrientationComponent,
-} from './ecs/types';
-import { EntityUtils, BTLogicComponent, AttackStatus, BehaviorStatsConfig } from './ai/core';
-import { LOGIC_CONFIG } from './ai/config';
-import { Point, Vec3 } from './types';
-import { Radians } from './utils';
-import { calculateTotalEntityWeight, getAggregatedInteractionSlots } from './ecs/utils/hierarchy';
+import { EntityId } from './ecs/types';
+import { IAIAgent, IAIWorld, HeadLimits, InteractionSlotInfo, ActiveInteraction } from './ai/ports';
+import { Blackboard, AttackStatus } from './ai/core';
+import { Vec3, Radians } from './types';
 import { getEffectiveLogicBrain } from './ecs/utils/anatomy';
+import { getAggregatedInteractionSlots } from './ecs/utils/hierarchy';
+import { LOGIC_CONFIG } from './ai/config';
+import { CREATURE_BLUEPRINTS, BodyStructureType } from './ecs/templates';
+import { BALANCE_CONFIG } from './config/balanceConfig';
 
-export class EntityAdapter {
+export class EntityAdapter implements IAIAgent {
   public dt: number = 0;
-  public utils!: EntityUtils;
 
   constructor(
     public readonly id: EntityId,
-    public readonly world: World
+    public readonly worldEcs: World,
+    public readonly world: IAIWorld
   ) {}
 
-  public getComponent<K extends keyof import('./ecs/types').EntityComponents>(key: K) {
-    return this.world.getComponent(this.id, key);
-  }
-
-  // --- Прямой доступ к компонентам сущности (Single Source of Truth) ---
-  public get input(): InputComponent | undefined {
-    return this.getComponent('input');
-  }
-  public get transform(): TransformComponent | undefined {
-    return this.getComponent('transform');
-  }
-  public get health(): HealthComponent | undefined {
-    return this.getComponent('health');
-  }
-  public get velocity(): VelocityComponent | undefined {
-    return this.getComponent('velocity');
-  }
-  public get movementStats(): MovementStatsComponent | undefined {
-    return this.getComponent('movementStats');
-  }
-  public get stealthStats(): StealthStatsComponent | undefined {
-    return this.getComponent('stealthStats');
-  }
-  public get physicsStats(): PhysicsStatsComponent | undefined {
-    return this.getComponent('physicsStats');
-  }
-  public get activeAttacks(): ActiveAttackComponent | undefined {
-    return this.getComponent('activeAttacks');
-  }
-  public get itemData(): ItemData | undefined {
-    return this.getComponent('item');
-  }
-  public get inventory(): InventoryComponent | undefined {
-    return this.getComponent('inventory');
-  }
-  public get weaponStats(): WeaponStatsComponent | undefined {
-    return this.getComponent('weaponStats');
-  }
-  public get weaponZone(): HitZoneConfig | undefined {
-    return this.getComponent('weaponZone');
-  }
-  public get armorStats(): ArmorStatsComponent | undefined {
-    return this.getComponent('armorStats');
-  }
-  public get ownership(): OwnershipComponent | undefined {
-    return this.getComponent('ownership');
-  }
-  public get equip(): EquipmentComponent | undefined {
-    return this.getComponent('equip');
-  }
-  public get interactionSlots(): InteractionSlotsComponent | undefined {
-    return this.getComponent('interactionSlots');
-  }
-  public get interactionAction(): InteractionActionComponent | undefined {
-    return this.getComponent('interactionAction');
-  }
-  public get perception(): PerceptionComponent | undefined {
-    return this.getComponent('perception');
-  }
-  public get headOrientation(): HeadOrientationComponent | undefined {
-    return this.getComponent('headOrientation');
-  }
-  public get brain(): BTLogicComponent | undefined {
-    return getEffectiveLogicBrain(this.world, this.id);
-  }
-
-  // --- Read-Only вычисляемые свойства состояния ---
   public get isAlive(): boolean {
-    return this.health?.isAlive ?? false;
-  }
-  public get hp(): number {
-    return this.health?.current ?? 0;
-  }
-  public get maxHp(): number {
-    return this.health?.max.current ?? 0;
-  }
-  public get pos(): Vec3 {
-    const tr = this.transform;
-    return tr ? { x: tr.x, y: tr.y, z: tr.z } : { x: 0, y: 0, z: 0 };
-  }
-  public get angle(): Radians {
-    return this.transform?.angle ?? (0 as Radians);
-  }
-  public get radius(): number {
-    return this.physicsStats?.radius.current ?? 0.4;
-  }
-  public get baseRadius(): number {
-    return this.physicsStats?.radius.base ?? this.radius;
-  }
-  public get weight(): number {
-    return this.physicsStats?.weight.current ?? 1;
-  }
-  public get baseWeight(): number {
-    return this.physicsStats?.weight.base ?? this.weight;
-  }
-  public get totalWeight(): number {
-    return calculateTotalEntityWeight(this.world, this.id);
-  }
-  public get isSolid(): boolean {
-    return this.physicsStats?.isSolid ?? true;
+    return this.worldEcs.getComponent(this.id, 'health')?.isAlive ?? false;
   }
 
-  public get maxSpeed(): number {
-    return this.movementStats?.maxSpeed.current ?? 0;
-  }
-  public get maxTurnSpeed(): Radians {
-    return (this.movementStats?.maxTurnSpeed.current ?? 0) as Radians;
-  }
-  public get currentSpeed(): number {
-    return this.velocity?.currentSpeed ?? 0;
-  }
-  public get currentTurnSpeed(): Radians {
-    return (this.velocity?.currentTurnSpeed ?? 0) as Radians;
+  public get brain() {
+    return getEffectiveLogicBrain(this.worldEcs, this.id);
   }
 
-  public get stance(): CreatureStance {
-    return this.getComponent('meta')?.stance ?? 'standing';
-  }
-  public get desiredStance(): BaseCreatureStance {
-    return this.input?.desiredStance ?? 'standing';
-  }
-  public get movementMode(): CreatureMovementMode {
-    return this.getComponent('meta')?.movementMode ?? 'immobile';
-  }
-  public get directionMode(): CreatureDirectionMode {
-    return this.getComponent('meta')?.directionMode ?? 'immobile';
-  }
-  public get actionMode(): CreatureActionMode {
-    return this.getComponent('meta')?.actionMode ?? 'idle';
+  public get blackboard(): Blackboard {
+    return this.brain!.blackboard;
   }
 
-  public get targetLookAngle(): Radians | undefined {
-    return this.input?.targetLookAngle;
-  }
-  public get isInteracting(): boolean {
-    return this.interactionAction !== undefined;
-  }
-  public get interactionPhase(): InteractionPhase | null {
-    return this.interactionAction?.phase ?? null;
-  }
-
-  public get attackStatus(): AttackStatus {
-    const currentAttack = this.activeAttacks?.attacks[0];
-    if (!currentAttack) return 'idle';
-    if (currentAttack.phase === 'prep' || currentAttack.phase === 'cast') {
-      return 'attacking';
-    }
-    if (currentAttack.phase === 'recovery') {
-      return 'cooldown';
-    }
-    return 'idle';
-  }
-
-  public get attackPhase(): 'prep' | 'cast' | 'recovery' | null {
-    return this.activeAttacks?.attacks[0]?.phase ?? null;
-  }
-
-  public get hasPendingAttackRequest(): boolean {
-    return this.input?.wantsAttack ?? false;
+  public getEventQueue() {
+    return this.brain?.event_queue ?? [];
   }
 
   public get timeScaleMultiplier(): number {
-    return this.getComponent('timeScale')?.multiplier.current ?? 1.0;
+    return this.worldEcs.getComponent(this.id, 'timeScale')?.multiplier.current ?? 1.0;
   }
 
-  public get aiStats(): BehaviorStatsConfig {
-    const aiStats = this.getComponent('aiStats');
-    const custom = aiStats?.stats;
+  // === СЕНСОРЫ ===
+
+  public getPos(): Vec3 {
+    const t = this.worldEcs.getComponent(this.id, 'transform');
+    return t ? { x: t.x, y: t.y, z: t.z } : { x: 0, y: 0, z: 0 };
+  }
+
+  public getAngle(): Radians {
+    return this.worldEcs.getComponent(this.id, 'transform')?.angle ?? (0 as Radians);
+  }
+
+  public getHeadYaw(): Radians {
+    return this.worldEcs.getComponent(this.id, 'headOrientation')?.yaw ?? this.getAngle();
+  }
+
+  public getPhysicsRadius(): number {
+    return this.worldEcs.getComponent(this.id, 'physicsStats')?.radius.current ?? 0.4;
+  }
+
+  public getPhysicsHeight(): number {
+    return this.worldEcs.getComponent(this.id, 'physicsStats')?.height?.current ?? 1.8;
+  }
+
+  public getHeadLimits(): HeadLimits | null {
+    const animator = this.worldEcs.getComponent(this.id, 'animator');
+    if (!animator) return null;
+    const limits = CREATURE_BLUEPRINTS[animator.rigType as BodyStructureType]?.headLimits;
+    if (!limits) return null;
     return {
-      detectDist: custom?.detectDist ?? LOGIC_CONFIG.detectDist,
-      loseTargetDist: custom?.loseTargetDist ?? LOGIC_CONFIG.loseTargetDist,
-      inPosDist: custom?.inPosDist ?? LOGIC_CONFIG.inPosDist,
-      followStopDist: custom?.followStopDist ?? LOGIC_CONFIG.followStopDist,
-      followUpDist: custom?.followUpDist ?? LOGIC_CONFIG.followUpDist,
+      ...limits,
+      turnBodyFollowRatio: BALANCE_CONFIG.creature.headTurnBodyFollowRatio,
+      turnBodyStopRatio: BALANCE_CONFIG.creature.headTurnBodyStopRatio,
     };
   }
 
-  public isSlotBusy(slotIndex: number): boolean {
-    return this.activeAttacks?.attacks.some((a) => a.slotIndex === slotIndex) ?? false;
+  public getSenseStats() {
+    const p = this.worldEcs.getComponent(this.id, 'perception');
+    if (!p) return null;
+    return {
+      visionFovAngle: p.visionFovAngle,
+      visionClarity: p.visionClarity,
+      visionMaxDist: p.visionMaxDistance,
+      hearingSensitivity: p.hearingSensitivity,
+      hearingMaxDist: p.hearingMaxDistance,
+    };
   }
 
-  public isWeaponBusy(weaponId: EntityId): boolean {
-    return this.activeAttacks?.attacks.some((a) => a.weaponId === weaponId) ?? false;
-  }
-
-  public getFreeWeaponSlots(): { slotIndex: number; weaponId: EntityId }[] {
-    const aggSlots = getAggregatedInteractionSlots(this.world, this.id);
-    const activeAttacks = this.activeAttacks;
-    const busyGlobalIndices = new Set(activeAttacks?.attacks.map((a: any) => a.slotIndex));
-    const freeSlots: { slotIndex: number; weaponId: EntityId }[] = [];
-
-    aggSlots.forEach((info: any) => {
-      if (info.slot.itemId !== null && !busyGlobalIndices.has(info.globalSlotIndex)) {
-        const item = this.world.getComponent(info.slot.itemId, 'item');
-        if (item?.type === 'weapon') {
-          freeSlots.push({ slotIndex: info.globalSlotIndex, weaponId: info.slot.itemId });
+  public getBehaviorStats() {
+    const s = this.worldEcs.getComponent(this.id, 'aiStats')?.stats;
+    return s
+      ? {
+          detectDist: s.detectDist ?? LOGIC_CONFIG.detectDist,
+          loseTargetDist: s.loseTargetDist ?? LOGIC_CONFIG.loseTargetDist,
+          followStopDist: s.followStopDist ?? LOGIC_CONFIG.followStopDist,
+          followUpDist: s.followUpDist ?? LOGIC_CONFIG.followUpDist,
         }
-      }
-    });
-
-    return freeSlots;
+      : null;
   }
 
-  public getPos(): Vec3 {
-    return this.pos;
+  public getHp(): number {
+    return this.worldEcs.getComponent(this.id, 'health')?.current ?? 0;
+  }
+
+  public getMaxHp(): number {
+    return this.worldEcs.getComponent(this.id, 'health')?.max.current ?? 0;
+  }
+
+  public getInteractionSlots(): InteractionSlotInfo[] {
+    const agg = getAggregatedInteractionSlots(this.worldEcs, this.id);
+    return agg.map((a) => ({
+      globalSlotIndex: a.globalSlotIndex,
+      partId: a.partId,
+      slotKind: a.slot.slotKind ?? 'left_hand',
+      itemId: a.slot.itemId,
+      interactDist: a.slot.interactDist,
+      strength: a.slot.strength,
+      isBroken: a.isBroken,
+    }));
+  }
+
+  public isSlotBusy(slotIndex: number): boolean {
+    const atk = this.worldEcs.getComponent(this.id, 'activeAttacks');
+    return atk?.attacks.some((a) => a.slotIndex === slotIndex) ?? false;
+  }
+
+  public getAttackStatus(): AttackStatus {
+    const atk = this.worldEcs.getComponent(this.id, 'activeAttacks');
+    const current = atk?.attacks[0];
+    if (!current) return 'idle';
+    return current.phase === 'prep' || current.phase === 'cast' ? 'attacking' : 'cooldown';
+  }
+
+  public hasPendingAttackRequest(): boolean {
+    return this.worldEcs.getComponent(this.id, 'input')?.wantsAttack ?? false;
+  }
+
+  public getCurrentInteraction(): ActiveInteraction | null {
+    const act = this.worldEcs.getComponent(this.id, 'interactionAction');
+    return act ? { type: act.type, phase: act.phase, targetId: act.targetId } : null;
+  }
+
+  // === АКТУАТОРЫ ===
+
+  public clearMoveTarget(): void {
+    const input = this.worldEcs.getComponent(this.id, 'input');
+    if (input) {
+      input.desiredMoveVector = null;
+      input.moveForward = 0;
+      input.moveStrafe = 0;
+      input.isMovingForward = false;
+      input.isRunning = false;
+      input.isSlowWalking = false;
+    }
+  }
+
+  public setMoveTarget(dx: number, dz: number, run?: boolean, slowWalk?: boolean): void {
+    const input = this.worldEcs.getComponent(this.id, 'input');
+    if (input) {
+      input.desiredMoveVector = { x: dx, z: dz };
+      if (run !== undefined) input.isRunning = run;
+      if (slowWalk !== undefined) input.isSlowWalking = slowWalk;
+    }
+  }
+
+  public setLookTarget(yaw: Radians, pitch?: Radians): void {
+    const input = this.worldEcs.getComponent(this.id, 'input');
+    if (input) {
+      input.targetLookAngle = yaw;
+      if (pitch !== undefined) input.targetLookPitch = pitch;
+    }
+  }
+
+  public clearLookTarget(): void {
+    const input = this.worldEcs.getComponent(this.id, 'input');
+    if (input) {
+      input.targetLookAngle = undefined;
+      input.targetLookPitch = undefined;
+    }
+  }
+
+  public setBodyAngleTarget(yaw: Radians): void {
+    const input = this.worldEcs.getComponent(this.id, 'input');
+    if (input) input.desiredBodyAngle = yaw;
+  }
+
+  public clearBodyAngleTarget(): void {
+    const input = this.worldEcs.getComponent(this.id, 'input');
+    if (input) {
+      input.desiredBodyAngle = undefined;
+      input.turnDirection = 0;
+      input.turnRatio = 0;
+    }
+  }
+
+  public setStance(stance: 'standing' | 'crouching' | 'prone'): void {
+    const input = this.worldEcs.getComponent(this.id, 'input');
+    if (input) input.desiredStance = stance;
+  }
+
+  public intentAttack(slotIndex?: number, slotKind?: string): void {
+    const input = this.worldEcs.getComponent(this.id, 'input');
+    if (input) {
+      input.wantsAttack = true;
+      input.attackSlotIndex = slotIndex;
+      input.attackSlotKind = slotKind;
+    }
+  }
+
+  public cancelAttack(slotIndex?: number): void {
+    const input = this.worldEcs.getComponent(this.id, 'input');
+    if (input) {
+      input.wantsAttack = false;
+      if (slotIndex !== undefined && input.attackSlotIndex === slotIndex) {
+        input.attackSlotIndex = undefined;
+      }
+    }
+    const activeAttacks = this.worldEcs.getComponent(this.id, 'activeAttacks');
+    if (activeAttacks) {
+      if (slotIndex !== undefined) {
+        activeAttacks.attacks = activeAttacks.attacks.filter((a) => a.slotIndex !== slotIndex);
+      } else {
+        activeAttacks.attacks = [];
+      }
+    }
+  }
+
+  public intentPickupItem(targetId: string): void {
+    this.worldEcs.addComponent(this.id, 'pickupIntent', { targetItemId: targetId });
+  }
+
+  public intentDropItem(slotIndex: number): void {
+    this.worldEcs.addComponent(this.id, 'dropItemIntent', { slotIndex });
+  }
+
+  public intentThrowItem(slotIndex: number, partId: string, targetPos: Vec3): void {
+    this.worldEcs.addComponent(this.id, 'throwItemIntent', { slotIndex, partId, targetPos });
   }
 }

@@ -1,11 +1,11 @@
 import { ICommand } from '../ICommand';
-import type { GameApp } from '../../GameApp';
 import { SerializedEntityData } from '../../ecs/WorldSerializer';
+import { ICommandContext } from '../../core/contexts';
 
 export class EntitySnapshotCommand implements ICommand {
   constructor(
     public readonly description: string,
-    private app: GameApp,
+    private ctx: ICommandContext,
     private allAffectedIds: string[],
     private beforeEntities: SerializedEntityData[],
     private afterEntities: SerializedEntityData[],
@@ -27,27 +27,19 @@ export class EntitySnapshotCommand implements ICommand {
   ): void {
     // 1. Быстрое удаление всех затронутых сущностей из физики и мира перед накатом состояния
     for (const id of this.allAffectedIds) {
-      if (this.app.world.getEntity(id)) {
-        const phys = this.app.world.getComponent(id, 'physicsBody');
-        if (phys) {
-          if (phys.rawBody) this.app.physicsDriver.removeRigidBody(phys.rawBody);
-        }
-        this.app.world.removeEntity(id);
-        this.app.aiSystem.unregisterEntity(id);
-      }
+      this.ctx.removeEntityDirectly(id);
     }
 
     // 2. Десериализация (восстановление) нужной версии сущностей из JSON-дампа
     if (entitiesData.length > 0) {
-      this.app.serializer.deserializeEntities(entitiesData);
+      this.ctx.deserializeEntities(entitiesData);
     }
 
     // 3. Восстановление правильного выделения
-    this.app.selection.selectedEntityIds = new Set(selection.ids);
-    this.app.selection.selectEntity(selection.id, false);
+    this.ctx.selection.restoreSelection(selection.id, selection.ids);
 
     // 4. Синхронизация вторичных систем и физических структур
-    this.app.syncPhysicsStructures();
-    this.app.selection.emitSelectionChanged();
+    this.ctx.syncPhysicsStructures();
+    this.ctx.selection.emitSelectionChanged();
   }
 }

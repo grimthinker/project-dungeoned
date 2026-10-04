@@ -1,6 +1,6 @@
-import type { GameApp } from '../GameApp';
 import { EntitySnapshotCommand } from './commands/EntitySnapshotCommand';
 import { SerializedEntityData } from '../ecs/WorldSerializer';
+import { IEditorContext } from '../core/contexts';
 
 export class TransactionBuilder {
   private beforeEntities: SerializedEntityData[] = [];
@@ -8,12 +8,12 @@ export class TransactionBuilder {
   private beforeSelection: { id: string | null; ids: string[] };
 
   constructor(
-    private app: GameApp,
+    private ctx: IEditorContext,
     private description: string
   ) {
     this.beforeSelection = {
-      id: app.selection.selectedEntityId,
-      ids: Array.from(app.selection.selectedEntityIds),
+      id: ctx.selection.selectedEntityId,
+      ids: Array.from(ctx.selection.selectedEntityIds),
     };
   }
 
@@ -21,18 +21,18 @@ export class TransactionBuilder {
    * Захватывает состояние указанных сущностей и всей их иерархии (дети, инвентарь) ДО изменений.
    */
   public captureBefore(rootIds: string[]): void {
-    const expandedIds = this.app.gatherHierarchyIds(rootIds);
+    const expandedIds = this.ctx.gatherHierarchyIds(rootIds);
     for (const id of expandedIds) {
       this.allAffectedIds.add(id);
     }
-    this.beforeEntities = this.app.serializer.serializeEntities(Array.from(this.allAffectedIds));
+    this.beforeEntities = this.ctx.serializeEntities(Array.from(this.allAffectedIds));
   }
 
   /**
    * Вызывается после создания новых сущностей (Спавн, Клонирование), чтобы включить их в транзакцию.
    */
   public includeAdded(newRootIds: string[]): void {
-    const expandedIds = this.app.gatherHierarchyIds(newRootIds);
+    const expandedIds = this.ctx.gatherHierarchyIds(newRootIds);
     for (const id of expandedIds) {
       this.allAffectedIds.add(id);
     }
@@ -43,16 +43,16 @@ export class TransactionBuilder {
    */
   public commit(): void {
     const affectedArr = Array.from(this.allAffectedIds);
-    const afterEntities = this.app.serializer.serializeEntities(affectedArr);
+    const afterEntities = this.ctx.serializeEntities(affectedArr);
 
     const afterSelection = {
-      id: this.app.selection.selectedEntityId,
-      ids: Array.from(this.app.selection.selectedEntityIds),
+      id: this.ctx.selection.selectedEntityId,
+      ids: Array.from(this.ctx.selection.selectedEntityIds),
     };
 
     const command = new EntitySnapshotCommand(
       this.description,
-      this.app,
+      this.ctx,
       affectedArr,
       this.beforeEntities,
       afterEntities,
@@ -60,6 +60,6 @@ export class TransactionBuilder {
       afterSelection
     );
 
-    this.app.commandHistory.push(command);
+    this.ctx.pushCommand(command);
   }
 }

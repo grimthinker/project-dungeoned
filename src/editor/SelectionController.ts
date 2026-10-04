@@ -26,7 +26,11 @@ export class SelectionController {
       return null;
     }
     if (!this._cachedSelectedEntity || this._cachedSelectedEntity.id !== this.selectedEntityId) {
-      this._cachedSelectedEntity = new EntityAdapter(this.selectedEntityId, this.app.world);
+      this._cachedSelectedEntity = new EntityAdapter(
+        this.selectedEntityId,
+        this.app.world,
+        this.app.aiSystem
+      );
     }
     return this._cachedSelectedEntity;
   }
@@ -37,7 +41,7 @@ export class SelectionController {
       this.hoveredEntityId = null;
       return null;
     }
-    return new EntityAdapter(this.hoveredEntityId, this.app.world);
+    return new EntityAdapter(this.hoveredEntityId, this.app.world, this.app.aiSystem);
   }
 
   public selectEntity(id: string | null, clearGroup: boolean = false): void {
@@ -56,7 +60,9 @@ export class SelectionController {
 
     if (this.selectedEntityId !== id) {
       this.selectedEntityId = id;
-      this._cachedSelectedEntity = id ? new EntityAdapter(id, this.app.world) : null;
+      this._cachedSelectedEntity = id
+        ? new EntityAdapter(id, this.app.world, this.app.aiSystem)
+        : null;
       changed = true;
     }
 
@@ -70,6 +76,11 @@ export class SelectionController {
     this.selectedEntityIds = new Set(ids);
     this.selectEntity(ids.length > 0 ? ids[0] : null, false);
     this.emitSelectionChanged();
+  }
+
+  public restoreSelection(id: string | null, ids: string[]): void {
+    this.selectedEntityIds = new Set(ids);
+    this.selectEntity(id, false);
   }
 
   public deselectEntity(id: string): void {

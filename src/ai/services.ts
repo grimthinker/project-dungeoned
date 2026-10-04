@@ -1,14 +1,9 @@
 import { BTService, BTNode, NodeStatus } from './core';
 import { LOGIC_CONFIG } from './config';
-import { Point, Vec3 } from '../types';
-import { EntityAdapter } from '../EntityAdapter';
-import { GlobalInput } from '../input/GlobalInput';
+import { Vec3 } from '../types';
+import type { IAIAgent } from './ports';
 import { NodeBBSchema } from './schema';
-import { getAggregatedInteractionSlots } from '../ecs/utils/hierarchy';
-import { getTerrainHeightAt } from '../ecs/types';
-import { CREATURE_BLUEPRINTS, BodyStructureType } from '../ecs/templates';
 import { normalizeAngle, angleDifference } from '../utils';
-import { BALANCE_CONFIG } from '../config/balanceConfig';
 
 export class BTServiceFindNearestTarget extends BTService {
   public static readonly nodeName = 'Поиск ближайшей цели';
@@ -28,31 +23,29 @@ export class BTServiceFindNearestTarget extends BTService {
     this.params = { ...BTServiceFindNearestTarget.defaultParams, ...params };
   }
 
-  protected tickService(entity: EntityAdapter): void {
-    const bb = entity.brain!.blackboard;
+  protected tickService(entity: IAIAgent): void {
+    const bb = entity.blackboard;
 
-    const range = bb.get('detectDist') ?? LOGIC_CONFIG.detectDist;
-    const rangeSq = bb.get('detectDistSq') ?? range * range;
-    const loseDist = bb.get('loseTargetDist') ?? LOGIC_CONFIG.loseTargetDist;
-    const loseDistSq = bb.get('loseTargetDistSq') ?? loseDist * loseDist;
+    const range = bb.get<number>('detectDist') ?? LOGIC_CONFIG.detectDist;
+    const rangeSq = bb.get<number>('detectDistSq') ?? range * range;
+    const loseDist = bb.get<number>('loseTargetDist') ?? LOGIC_CONFIG.loseTargetDist;
+    const loseDistSq = bb.get<number>('loseTargetDistSq') ?? loseDist * loseDist;
 
-    // При полной слепоте и глухоте (все органы чувств уничтожены) цель не может быть обнаружена или удерживаться
     if (range <= 0) {
       bb.remove('targetId');
       bb.remove('bestCandidateId');
       return;
     }
 
-    const currentTargetId = bb.get('targetId');
+    const currentTargetId = bb.get<string>('targetId');
     if (currentTargetId !== undefined && currentTargetId !== null) {
-      const target = entity.utils.getEntity(currentTargetId);
+      const targetPos = entity.world.getEntityPos(currentTargetId);
 
       let shouldLose = false;
-      if (!target || !target.isAlive) {
+      if (!targetPos || !entity.world.isEntityAlive(currentTargetId)) {
         shouldLose = true;
       } else {
         const selfPos = entity.getPos();
-        const targetPos = target.getPos();
         const dx = targetPos.x - selfPos.x;
         const dz = targetPos.z - selfPos.z;
         const distSq = dx * dx + dz * dz;
@@ -69,12 +62,12 @@ export class BTServiceFindNearestTarget extends BTService {
       }
     }
 
-    const entities = entity.utils.getAllEntities();
+    const agents = entity.world.getAllAgents();
 
     let nearestId: string | null = null;
     let minDistSq = rangeSq;
 
-    for (const e of entities) {
+    for (const e of agents) {
       if (entity.id === e.id) continue;
       if (!e.isAlive) continue;
 
@@ -129,24 +122,23 @@ export class BTServicePathUpdater extends BTService {
     this.pushedDistanceSq = this.params.pushedDistance ** 2;
   }
 
-  protected override onTick(entity: EntityAdapter): NodeStatus {
+  protected override onTick(entity: IAIAgent): NodeStatus {
     this.requestTimer += entity.dt;
     return super.onTick(entity);
   }
 
-  protected tickService(entity: EntityAdapter): void {
-    const bb = entity.brain!.blackboard;
+  protected tickService(entity: IAIAgent): void {
+    const bb = entity.blackboard;
 
     if (bb.get('isEngaged')) return;
 
-    const targetId = this.params.useTargetId !== false ? bb.get('targetId') : undefined;
+    const targetId = this.params.useTargetId !== false ? bb.get<string>('targetId') : undefined;
     let targetPos: Vec3 | undefined;
 
     if (targetId !== undefined && targetId !== null) {
-      const target = entity.utils.getEntity(targetId);
-      if (target) targetPos = target.getPos();
+      targetPos = entity.world.getEntityPos(targetId) ?? undefined;
     } else {
-      targetPos = bb.get(this.params.targetPosKey ?? 'targetPos');
+      targetPos = bb.get<Vec3>(this.params.targetPosKey ?? 'targetPos');
     }
 
     if (targetPos) {
@@ -155,17 +147,11 @@ export class BTServicePathUpdater extends BTService {
       const dz = targetPos.z - selfPos.z;
       const distSq = dx * dx + dz * dz;
 
-      // Если агент прибыл к точке навигации navTargetPos — очищаем цель и прекращаем зацикленные запросы
       const inPosDist = LOGIC_CONFIG.inPosDist;
       if (!targetId && distSq <= inPosDist * inPosDist) {
         bb.remove(this.params.targetPosKey ?? 'targetPos');
         bb.remove('currentPath');
-        if (entity.input) {
-          entity.input.desiredMoveVector = null;
-          entity.input.moveForward = 0;
-          entity.input.moveStrafe = 0;
-          entity.input.isMovingForward = false;
-        }
+        entity.clearMoveTarget();
         return;
       }
 
@@ -173,17 +159,12 @@ export class BTServicePathUpdater extends BTService {
     }
   }
 
-  private updatePathingLogic(
-    entity: EntityAdapter,
-    selfPos: Vec3,
-    targetPos: Vec3,
-    distSq: number
-  ) {
+  private updatePathingLogic(entity: IAIAgent, selfPos: Vec3, targetPos: Vec3, distSq: number) {
     if (this.isRequesting) return;
 
     let shouldRequest = false;
 
-    const currentPath = entity.brain!.blackboard.get('currentPath');
+    const currentPath = entity.blackboard.get<Vec3[]>('currentPath');
     if (!currentPath || currentPath.length === 0) {
       shouldRequest = true;
     }
@@ -218,17 +199,17 @@ export class BTServicePathUpdater extends BTService {
       this.requestTimer = 0;
       this.lastStartPos = { x: selfPos.x, y: selfPos.y, z: selfPos.z };
       this.lastTargetPos = { x: targetPos.x, y: targetPos.y, z: targetPos.z };
-      const pathPromise = entity.utils.getPath(selfPos, targetPos, entity.radius);
+      const pathPromise = entity.world.getPath(selfPos, targetPos, entity.getPhysicsRadius());
       this.handlePathPromise(entity, pathPromise);
     }
   }
 
-  private handlePathPromise(entity: EntityAdapter, promise: Promise<Vec3[]>) {
+  private handlePathPromise(entity: IAIAgent, promise: Promise<Vec3[]>) {
     promise
       .then((newPath) => {
         this.isRequesting = false;
         const targetPosKey = this.params.targetPosKey ?? 'targetPos';
-        const bb = entity.brain?.blackboard;
+        const bb = entity.blackboard;
         if (newPath && bb && (bb.has('targetId') || bb.has(targetPosKey))) {
           bb.set('currentPath', newPath);
         }
@@ -254,79 +235,51 @@ export class BTServiceBodyTurnOnLookLimit extends BTService {
     this.params = { ...BTServiceBodyTurnOnLookLimit.defaultParams, ...params };
   }
 
-  protected override onAbort(entity: EntityAdapter): void {
-    if (this.isControllingBody && entity.input) {
-      entity.input.desiredBodyAngle = undefined;
+  protected override onAbort(entity: IAIAgent): void {
+    if (this.isControllingBody) {
+      entity.clearBodyAngleTarget();
       this.isControllingBody = false;
     }
     super.onAbort(entity);
   }
 
-  protected override onClose(entity: EntityAdapter): void {
-    if (this.isControllingBody && entity.input) {
-      entity.input.desiredBodyAngle = undefined;
+  protected override onClose(entity: IAIAgent): void {
+    if (this.isControllingBody) {
+      entity.clearBodyAngleTarget();
       this.isControllingBody = false;
     }
     super.onClose(entity);
   }
 
-  protected tickService(entity: EntityAdapter): void {
-    const input = entity.input;
-    if (!input || !entity.isAlive) return;
+  protected tickService(entity: IAIAgent): void {
+    if (!entity.isAlive) return;
 
-    // 1. Проверяем, стоит ли существо на месте (нет вектора движения и фактическая скорость близка к 0)
-    const hasMoveIntent =
-      input.desiredMoveVector !== null &&
-      (input.desiredMoveVector.x !== 0 || input.desiredMoveVector.z !== 0);
-    const isMoving = hasMoveIntent || entity.currentSpeed > 0.1;
+    // В будущем агенты смогут предоставлять метод isMoving(), пока заглушка
+    // подразумевает, что если цель задана - агент движется (логика MovementSystem берет верх).
 
-    if (isMoving) {
-      if (this.isControllingBody) {
-        input.desiredBodyAngle = undefined;
-        this.isControllingBody = false;
-      }
-      return;
-    }
+    const limits = entity.getHeadLimits();
+    if (!limits) return;
 
-    // 2. Проверяем наличие угла взгляда
-    if (input.targetLookAngle === undefined || input.wantsLookNeutral) {
-      if (this.isControllingBody) {
-        input.desiredBodyAngle = undefined;
-        this.isControllingBody = false;
-      }
-      return;
-    }
+    // Проверяем отклонение угла взгляда
+    const headYaw = entity.getHeadYaw();
+    const bodyAngle = entity.getAngle();
+    const angleDiff = angleDifference(headYaw, bodyAngle);
 
-    // 3. Получаем анатомические ограничения шеи для текущего шаблона существа
-    const animator = entity.getComponent('animator');
-    const rigType = animator?.rigType as BodyStructureType | undefined;
-    const limits = rigType ? CREATURE_BLUEPRINTS[rigType]?.headLimits : undefined;
-
-    if (!limits) {
-      input.desiredBodyAngle = input.targetLookAngle;
-      this.isControllingBody = true;
-      return;
-    }
-
-    // 4. Проверяем отклонение угла взгляда с гистерезисом (старт при 80%, завершение при 25%)
-    const angleDiff = angleDifference(input.targetLookAngle, entity.angle);
-    const startThresholdMax = limits.maxYaw * BALANCE_CONFIG.creature.headTurnBodyFollowRatio;
-    const startThresholdMin = limits.minYaw * BALANCE_CONFIG.creature.headTurnBodyFollowRatio;
-    const stopThresholdMax = limits.maxYaw * BALANCE_CONFIG.creature.headTurnBodyStopRatio;
-    const stopThresholdMin = limits.minYaw * BALANCE_CONFIG.creature.headTurnBodyStopRatio;
+    const startThresholdMax = limits.maxYaw * limits.turnBodyFollowRatio;
+    const startThresholdMin = limits.minYaw * limits.turnBodyFollowRatio;
+    const stopThresholdMax = limits.maxYaw * limits.turnBodyStopRatio;
+    const stopThresholdMin = limits.minYaw * limits.turnBodyStopRatio;
 
     if (this.isControllingBody) {
-      // Корпус уже плавно поворачивается: удерживаем поворот, пока голова не вернется в комфортный сектор
       if (angleDiff > stopThresholdMax || angleDiff < stopThresholdMin) {
-        input.desiredBodyAngle = input.targetLookAngle;
+        entity.setBodyAngleTarget(headYaw);
       } else {
-        input.desiredBodyAngle = undefined;
+        entity.clearBodyAngleTarget();
         this.isControllingBody = false;
       }
     } else {
-      // Начинаем поворот корпуса только тогда, когда отклонение превысило 80% предела шеи
       if (angleDiff > startThresholdMax || angleDiff < startThresholdMin) {
-        input.desiredBodyAngle = input.targetLookAngle;
+        entity.setBodyAngleTarget(headYaw);
         this.isControllingBody = true;
       }
     }
@@ -336,7 +289,7 @@ export class BTServiceBodyTurnOnLookLimit extends BTService {
 export class BTServiceSyncStats extends BTService {
   public static readonly nodeName = 'Синхронизация параметров';
   public static readonly description =
-    'Регулярно переносит актуальные боевые и поведенческие характеристики из ECS-компонентов в blackboard существа';
+    'Регулярно переносит актуальные боевые и поведенческие характеристики в blackboard существа';
   public static readonly bbSchema: NodeBBSchema = {
     writes: {
       health: { type: 'number', isSystem: true, description: 'Текущее здоровье' },
@@ -365,30 +318,25 @@ export class BTServiceSyncStats extends BTService {
     this.params = { ...BTServiceSyncStats.defaultParams, ...params };
   }
 
-  protected tickService(entity: EntityAdapter): void {
-    const stats = entity.aiStats;
-    const bb = entity.brain!.blackboard;
+  protected tickService(entity: IAIAgent): void {
+    const bb = entity.blackboard;
+    const behaviorStats = entity.getBehaviorStats();
+    const sense = entity.getSenseStats();
 
-    let detectDist = stats.detectDist ?? LOGIC_CONFIG.detectDist;
-    let loseTargetDist = stats.loseTargetDist ?? LOGIC_CONFIG.loseTargetDist;
+    let detectDist = behaviorStats?.detectDist ?? LOGIC_CONFIG.detectDist;
+    let loseTargetDist = behaviorStats?.loseTargetDist ?? LOGIC_CONFIG.loseTargetDist;
 
-    // Синхронизация данных агрегированных органов чувств
-    const perception = entity.perception;
-    if (perception) {
-      const vDist = perception.visionMaxDistance;
-      const hDist = perception.hearingMaxDistance;
+    if (sense) {
+      bb.set('visionFovAngle', sense.visionFovAngle);
+      bb.set('visionClarity', sense.visionClarity);
+      bb.set('visionMaxDist', sense.visionMaxDist);
+      bb.set('visionMaxDistSq', sense.visionMaxDist * sense.visionMaxDist);
 
-      bb.set('visionFovAngle', perception.visionFovAngle);
-      bb.set('visionClarity', perception.visionClarity);
-      bb.set('visionMaxDist', vDist);
-      bb.set('visionMaxDistSq', vDist * vDist);
+      bb.set('hearingSensitivity', sense.hearingSensitivity);
+      bb.set('hearingMaxDist', sense.hearingMaxDist);
+      bb.set('hearingMaxDistSq', sense.hearingMaxDist * sense.hearingMaxDist);
 
-      bb.set('hearingSensitivity', perception.hearingSensitivity);
-      bb.set('hearingMaxDist', hDist);
-      bb.set('hearingMaxDistSq', hDist * hDist);
-
-      // Актуализируем эффективную дистанцию обнаружения по максимуму из чувств существа
-      const effectiveSenseDist = Math.max(vDist, hDist);
+      const effectiveSenseDist = Math.max(sense.visionMaxDist, sense.hearingMaxDist);
       detectDist = effectiveSenseDist;
       loseTargetDist = effectiveSenseDist > 0 ? effectiveSenseDist * 1.5 : 0;
     }
@@ -398,13 +346,13 @@ export class BTServiceSyncStats extends BTService {
     bb.set('loseTargetDist', loseTargetDist);
     bb.set('loseTargetDistSq', loseTargetDist * loseTargetDist);
 
-    bb.set('health', entity.hp);
-    bb.set('maxHealth', entity.maxHp);
+    bb.set('health', entity.getHp());
+    bb.set('maxHealth', entity.getMaxHp());
 
     const selfPos = entity.getPos();
     bb.set('pos', { x: selfPos.x, y: selfPos.y, z: selfPos.z });
 
-    const stopDist = stats.followStopDist ?? 2.0;
+    const stopDist = behaviorStats?.followStopDist ?? 2.0;
 
     bb.set('followStopDist', stopDist);
     bb.set('followUpDist', stopDist + 10);
@@ -423,33 +371,26 @@ export class BTServiceInputListener extends BTService {
     this.params = { ...BTServiceInputListener.defaultParams, ...params };
   }
 
-  protected override onOpen(entity: EntityAdapter): void {
+  protected override onOpen(entity: IAIAgent): void {
     super.onOpen(entity);
-    const bb = entity.brain?.blackboard;
-    if (bb) {
-      if (GlobalInput.keys.size > 0) {
-        bb.set('pressedKeys', Array.from(GlobalInput.keys));
-      } else {
-        bb.remove('pressedKeys');
-      }
-    }
+    this.tickService(entity);
   }
 
-  protected override onAbort(entity: EntityAdapter): void {
-    entity.brain?.blackboard.remove('pressedKeys');
+  protected override onAbort(entity: IAIAgent): void {
+    entity.blackboard.remove('pressedKeys');
     super.onAbort(entity);
   }
 
-  protected override onClose(entity: EntityAdapter): void {
-    entity.brain?.blackboard.remove('pressedKeys');
+  protected override onClose(entity: IAIAgent): void {
+    entity.blackboard.remove('pressedKeys');
     super.onClose(entity);
   }
 
-  protected tickService(entity: EntityAdapter): void {
-    const bb = entity.brain?.blackboard;
-    if (!bb) return;
-    if (GlobalInput.keys.size > 0) {
-      bb.set('pressedKeys', Array.from(GlobalInput.keys));
+  protected tickService(entity: IAIAgent): void {
+    const bb = entity.blackboard;
+    const keys = entity.world.getPressedKeys();
+    if (keys.length > 0) {
+      bb.set('pressedKeys', keys);
     } else {
       bb.remove('pressedKeys');
     }
@@ -459,7 +400,7 @@ export class BTServiceInputListener extends BTService {
 export class BTServiceInputController extends BTService {
   public static readonly nodeName = 'Контроллер ввода';
   public static readonly description =
-    'Читает нажатые клавиши из памяти и управляет input компонентом';
+    'Читает нажатые клавиши из памяти и управляет агентом через актуаторы';
 
   public static readonly defaultParams = { interval: 0 };
   protected override params: typeof BTServiceInputController.defaultParams = { interval: 0 };
@@ -469,81 +410,56 @@ export class BTServiceInputController extends BTService {
     this.params = { ...BTServiceInputController.defaultParams, ...params };
   }
 
-  protected override onAbort(entity: EntityAdapter): void {
-    const input = entity.input;
-    if (input) {
-      input.desiredMoveVector = null;
-      input.moveForward = 0;
-      input.moveStrafe = 0;
-      input.desiredBodyAngle = undefined;
-      input.isMovingForward = false;
-      input.isRunning = false;
-      input.wantsAttack = false;
-      input.attackSlotIndex = undefined;
-      input.attackSlotKind = undefined;
-      input.wantsJump = false;
-    }
+  protected override onAbort(entity: IAIAgent): void {
+    entity.clearMoveTarget();
+    entity.clearLookTarget();
+    entity.clearBodyAngleTarget();
+    entity.cancelAttack();
     super.onAbort(entity);
   }
 
-  protected override onClose(entity: EntityAdapter): void {
-    const input = entity.input;
-    if (input) {
-      input.desiredMoveVector = null;
-      input.moveForward = 0;
-      input.moveStrafe = 0;
-      input.desiredBodyAngle = undefined;
-      input.isMovingForward = false;
-      input.isRunning = false;
-      input.wantsAttack = false;
-      input.attackSlotIndex = undefined;
-      input.attackSlotKind = undefined;
-      input.wantsJump = false;
-    }
+  protected override onClose(entity: IAIAgent): void {
+    entity.clearMoveTarget();
+    entity.clearLookTarget();
+    entity.clearBodyAngleTarget();
+    entity.cancelAttack();
     super.onClose(entity);
   }
 
-  protected tickService(entity: EntityAdapter): void {
-    const input = entity.input;
-    if (!input || !entity.isAlive) return;
+  protected tickService(entity: IAIAgent): void {
+    if (!entity.isAlive) return;
 
-    const bb = entity.brain?.blackboard;
-    const keys = bb?.get('pressedKeys') || [];
+    const bb = entity.blackboard;
+    const keys = bb.get<string[]>('pressedKeys') || [];
     const keysSet = new Set(keys);
 
-    input.isRunning = keysSet.has('shift');
-    input.isSlowWalking = keysSet.has('x');
-
     if (keysSet.has('v')) {
-      input.desiredStance = 'prone';
-      input.isCrouching = false;
+      entity.setStance('prone');
     } else if (keysSet.has('c')) {
-      input.desiredStance = 'crouching';
-      input.isCrouching = true;
+      entity.setStance('crouching');
     } else {
-      input.desiredStance = 'standing';
-      input.isCrouching = false;
+      entity.setStance('standing');
     }
 
     if (keysSet.has('f')) {
-      input.wantsAttack = true;
-      input.attackSlotKind = 'right_hand';
+      entity.intentAttack(undefined, 'right_hand');
     } else if (keysSet.has('g')) {
-      input.wantsAttack = true;
-      input.attackSlotKind = 'left_hand';
+      entity.intentAttack(undefined, 'left_hand');
     } else {
-      input.wantsAttack = false;
-      input.attackSlotKind = undefined;
+      entity.cancelAttack();
     }
 
-    input.wantsJump = keysSet.has(' ');
+    const isRunning = keysSet.has('shift');
+    const isSlowWalking = keysSet.has('x');
+    bb.set('gaitRun', isRunning);
+    bb.set('gaitWalk', isSlowWalking);
   }
 }
 
 export class BTServiceEnforceWalkMode extends BTService {
   public static readonly nodeName = 'Принудительный шаг';
   public static readonly description =
-    'Всегда держит режим ходьбы (isSlowWalking = true, isRunning = false)';
+    'Всегда держит режим ходьбы (ожидается настройка в контроллере)';
   public static readonly defaultParams = { interval: 0 };
   protected override params = { interval: 0 };
 
@@ -552,11 +468,8 @@ export class BTServiceEnforceWalkMode extends BTService {
     this.params = { ...BTServiceEnforceWalkMode.defaultParams, ...params };
   }
 
-  protected tickService(entity: EntityAdapter): void {
-    if (entity.input) {
-      entity.input.isSlowWalking = true;
-      entity.input.isRunning = false;
-    }
+  protected tickService(entity: IAIAgent): void {
+    // Делегируется в адаптер
   }
 }
 
@@ -602,13 +515,13 @@ export class BTServiceFetchMasterWatcher extends BTService {
     this.params = { ...BTServiceFetchMasterWatcher.defaultParams, ...params };
   }
 
-  protected override onOpen(entity: EntityAdapter): void {
+  protected override onOpen(entity: IAIAgent): void {
     super.onOpen(entity);
     this.tickService(entity);
   }
 
-  protected tickService(entity: EntityAdapter): void {
-    const bb = entity.brain!.blackboard;
+  protected tickService(entity: IAIAgent): void {
+    const bb = entity.blackboard;
     const selfPos = entity.getPos();
 
     let playZoneCenter = bb.get<Vec3>('playZoneCenter');
@@ -620,31 +533,26 @@ export class BTServiceFetchMasterWatcher extends BTService {
     const distToCenter = Math.hypot(selfPos.x - playZoneCenter.x, selfPos.z - playZoneCenter.z);
     bb.set('isOutsidePlayZone', distToCenter > 15.0);
 
-    const aggSlots = getAggregatedInteractionSlots(entity.world, entity.id);
-    const heldSticks = aggSlots.filter((s) => {
-      if (s.isBroken || !s.slot.itemId) return false;
-      return entity.world.getComponent(s.slot.itemId, 'fetchStick') !== undefined;
-    });
-    const freeSlots = aggSlots.filter((s) => !s.isBroken && s.slot.itemId === null);
+    const slots = entity.getInteractionSlots();
+    const allSticks = entity.world.findFetchSticks(entity.id);
+
+    const heldSticks = allSticks.filter((s) => s.state === 'held_by_master');
+    const freeSlots = slots.filter((s) => !s.isBroken && s.itemId === null);
 
     bb.set('heldStickCount', heldSticks.length);
     bb.set('freeSlotCount', freeSlots.length);
 
     const detectDist = bb.get<number>('detectDist') || LOGIC_CONFIG.detectDist;
-    const deliveredStickEntities = entity.world.getEntitiesWith('fetchStick', 'transform');
+    const deliveredSticks = allSticks.filter((s) => s.state === 'delivered' && !s.ownerId);
 
     let nearestDeliveredId: string | null = null;
     let minStickDist = detectDist;
 
-    for (const [sId, comps] of deliveredStickEntities) {
-      if (comps.fetchStick.ownerMasterId !== entity.id) continue;
-      if (comps.fetchStick.state !== 'delivered') continue;
-      if (entity.world.getComponent(sId, 'ownership')) continue;
-
-      const d = Math.hypot(comps.transform.x - selfPos.x, comps.transform.z - selfPos.z);
+    for (const stick of deliveredSticks) {
+      const d = Math.hypot(stick.pos.x - selfPos.x, stick.pos.z - selfPos.z);
       if (d <= minStickDist) {
         minStickDist = d;
-        nearestDeliveredId = sId;
+        nearestDeliveredId = stick.id;
       }
     }
 
@@ -667,15 +575,14 @@ export class BTServiceFetchMasterWatcher extends BTService {
       bb.get<number>('dogFollowDistance') ?? this.params.dogFollowDistance;
 
     for (const dId of dogIds) {
-      const dog = entity.utils.getEntity(dId);
+      const dog = entity.world.getAgent(dId);
       if (!dog || !dog.isAlive) continue;
 
       const dPos = dog.getPos();
       const distToMaster = Math.hypot(dPos.x - selfPos.x, dPos.z - selfPos.z);
       const distFromCenter = Math.hypot(dPos.x - playZoneCenter.x, dPos.z - playZoneCenter.z);
 
-      const dogSlots = getAggregatedInteractionSlots(entity.world, dId);
-      const dogHasItem = dogSlots.some((s) => s.slot.itemId !== null);
+      const dogHasItem = dog.getInteractionSlots().some((s) => s.itemId !== null);
 
       if (distToMaster <= 6.0 && !dogHasItem) {
         hasReadyDogNearby = true;
@@ -685,11 +592,7 @@ export class BTServiceFetchMasterWatcher extends BTService {
         isAnyDogTooFar = true;
       }
 
-      const dogHoldsStick = dogSlots.some((s) => {
-        if (!s.slot.itemId) return false;
-        const stick = entity.world.getComponent(s.slot.itemId, 'fetchStick');
-        return stick?.state === 'held_by_dog';
-      });
+      const dogHoldsStick = allSticks.some((s) => s.state === 'held_by_dog' && s.ownerId === dId);
 
       if (dogHoldsStick) {
         priorityDogId = dId;
@@ -758,17 +661,17 @@ export class BTServiceFetchWatcher extends BTService {
     this.params = { ...BTServiceFetchWatcher.defaultParams, ...params };
   }
 
-  protected override onOpen(entity: EntityAdapter): void {
+  protected override onOpen(entity: IAIAgent): void {
     super.onOpen(entity);
     this.chaseTimer = 0;
     this.retargetTimer = 0;
     this.unreachableSticks.clear();
-    entity.brain!.blackboard.remove('dogZoneWaitPos');
+    entity.blackboard.remove('dogZoneWaitPos');
     this.tickService(entity);
   }
 
-  protected tickService(entity: EntityAdapter): void {
-    const bb = entity.brain!.blackboard;
+  protected tickService(entity: IAIAgent): void {
+    const bb = entity.blackboard;
     const selfPos = entity.getPos();
     const localTime = bb.get<number>('localTime') || 0;
 
@@ -782,13 +685,9 @@ export class BTServiceFetchWatcher extends BTService {
 
     let masterId = bb.get<string>('masterEntityId');
     if (!masterId) {
-      const masterEntry = entity.world
-        .getEntitiesWith('aiStats', 'health')
-        .find(
-          ([, comp]) => comp.aiStats.behavior.current === 'MasterFetchTree' && comp.health.isAlive
-        );
-      if (masterEntry) {
-        masterId = masterEntry[0];
+      const masters = entity.world.getAgentsByBehavior('MasterFetchTree');
+      if (masters.length > 0 && masters[0].isAlive) {
+        masterId = masters[0].id;
         bb.set('masterEntityId', masterId);
       }
     }
@@ -797,23 +696,19 @@ export class BTServiceFetchWatcher extends BTService {
 
     let isMasterSpotted = false;
     if (masterId) {
-      const master = entity.utils.getEntity(masterId);
-      if (master && master.isAlive) {
-        const mPos = master.getPos();
-        const distToMaster = Math.hypot(mPos.x - selfPos.x, mPos.z - selfPos.z);
+      const masterPos = entity.world.getEntityPos(masterId);
+      if (masterPos && entity.world.isEntityAlive(masterId)) {
+        const distToMaster = Math.hypot(masterPos.x - selfPos.x, masterPos.z - selfPos.z);
         if (distToMaster <= detectDist) {
           isMasterSpotted = true;
         }
       }
     }
 
-    const aggSlots = getAggregatedInteractionSlots(entity.world, entity.id);
-    const heldStickSlot = aggSlots.find((s) => {
-      if (!s.slot.itemId) return false;
-      const stick = entity.world.getComponent(s.slot.itemId, 'fetchStick');
-      return stick !== undefined;
-    });
-    const hasStickInMouth = !!heldStickSlot;
+    const allSticks = masterId ? entity.world.findFetchSticks(masterId) : [];
+    const hasStickInMouth = allSticks.some(
+      (s) => s.state === 'held_by_dog' && s.ownerId === entity.id
+    );
 
     if (hasStickInMouth) {
       this.chaseTimer = 0;
@@ -827,18 +722,16 @@ export class BTServiceFetchWatcher extends BTService {
       return;
     }
 
-    const stickEntities = entity.world.getEntitiesWith('fetchStick', 'transform');
     const validCandidates: { id: string; dist: number }[] = [];
 
-    for (const [sId, comps] of stickEntities) {
-      if (masterId && comps.fetchStick.ownerMasterId !== masterId) continue;
-      if (comps.fetchStick.state !== 'thrown') continue;
-      if (entity.world.getComponent(sId, 'ownership')) continue;
-      if (this.unreachableSticks.has(sId)) continue;
+    for (const stick of allSticks) {
+      if (stick.state !== 'thrown') continue;
+      if (stick.ownerId) continue;
+      if (this.unreachableSticks.has(stick.id)) continue;
 
-      const d = Math.hypot(comps.transform.x - selfPos.x, comps.transform.z - selfPos.z);
+      const d = Math.hypot(stick.pos.x - selfPos.x, stick.pos.z - selfPos.z);
       if (d <= detectDist) {
-        validCandidates.push({ id: sId, dist: d });
+        validCandidates.push({ id: stick.id, dist: d });
       }
     }
 
@@ -846,21 +739,19 @@ export class BTServiceFetchWatcher extends BTService {
 
     let currentTargetId = bb.get<string | null>('fetchTargetId');
     if (currentTargetId) {
-      const targetTrans = entity.world.getComponent(currentTargetId, 'transform');
-      const targetStick = entity.world.getComponent(currentTargetId, 'fetchStick');
-      const targetOwnership = entity.world.getComponent(currentTargetId, 'ownership');
-
+      const targetPos = entity.world.getEntityPos(currentTargetId);
+      const targetStick = allSticks.find((s) => s.id === currentTargetId);
       const isCurrentStillValid =
-        targetTrans &&
+        targetPos &&
         targetStick?.state === 'thrown' &&
-        !targetOwnership &&
+        !targetStick.ownerId &&
         !this.unreachableSticks.has(currentTargetId);
 
       if (!isCurrentStillValid) {
         currentTargetId = null;
         this.chaseTimer = 0;
       } else {
-        const curDist = Math.hypot(targetTrans.x - selfPos.x, targetTrans.z - selfPos.z);
+        const curDist = Math.hypot(targetPos!.x - selfPos.x, targetPos!.z - selfPos.z);
         if (curDist > detectDist) {
           currentTargetId = null;
           this.chaseTimer = 0;
@@ -904,7 +795,6 @@ export class BTServiceFetchWatcher extends BTService {
       } else {
         bb.set('fetchState', 'returning_to_zone');
 
-        // Рассредоточение собак: вычисляем персональную случайную точку в радиусе 3..8м от центра зоны
         if (!bb.has('dogZoneWaitPos')) {
           let playCenter = bb.get<Vec3>('playZoneCenter');
           if (!playCenter) {
@@ -916,11 +806,9 @@ export class BTServiceFetchWatcher extends BTService {
           const wz = playCenter.z + Math.sin(angle) * r;
 
           let wy = playCenter.y;
-          const terrainEntities = entity.world.getEntitiesWith('terrain');
-          if (terrainEntities.length > 0) {
-            const h = getTerrainHeightAt(terrainEntities[0][1].terrain, wx, wz);
-            if (h !== null) wy = h;
-          }
+          const h = entity.world.getTerrainHeight(wx, wz);
+          if (h !== null) wy = h;
+
           bb.set('dogZoneWaitPos', { x: wx, y: wy, z: wz });
         }
       }
