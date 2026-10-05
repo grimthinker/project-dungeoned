@@ -50,7 +50,7 @@ export const DOMAINS = {
   ],
 
   // 5. Игровой интерфейс (Game HUD - чистый UI без ECS)
-  gameHud: [
+  game_hud: [
     'src/components/gameHud/**/*',
     'src/components/GameHUD.tsx',
     'src/config/hudConfig.ts',
@@ -89,6 +89,73 @@ export const DOMAINS = {
     'src/ecs/systems/PhysicsSystem.ts',
     'src/ecs/components/physics.ts',
     'src/ecs/utils/obstacleColliders.ts',
+    'src/types.ts',
+    'src/utils.ts',
+  ],
+
+  // --- ПОДДОМЕНЫ (Узкие задачи) ---
+  core_ecs: [
+    'src/ecs/World.ts',
+    'src/ecs/types.ts',
+    'src/ecs/components/**/*.ts',
+    'src/ecs/EntityFactory.ts',
+  ],
+  dialogue_system: [
+    'src/ecs/systems/DialogueSystem.ts',
+    'src/ecs/components/dialogue.ts',
+    'src/dialogue/**/*',
+    'src/components/gameHud/BlockDialogue.tsx',
+  ],
+  interaction: [
+    'src/ecs/systems/InteractionSystem.ts',
+    'src/ecs/components/interaction.ts',
+    'src/ecs/utils/itemValidation.ts',
+  ],
+
+  // --- НАДДОМЕНЫ (Широкие задачи) ---
+  gameplay_core: [
+    // Вся бизнес-логика игрового процесса (без рендера и редактора)
+    'src/ecs/World.ts',
+    'src/ecs/types.ts',
+    'src/ecs/components/**/*.ts',
+    'src/ecs/systems/!(ThreeSyncSystem|PhysicsSystem)*.ts', // берем все системы кроме рендера и физики
+    'src/ecs/utils/**/*.ts',
+    'src/dialogue/**/*',
+    'src/core/EventBus.ts',
+  ],
+
+  task_reading_system: [
+    'src/ecs/types.ts',
+    'src/ecs/components/interaction.ts', // Куда добавим новый глагол
+    'src/ecs/components/readable.ts', // (Нейросеть создаст этот файл)
+    'src/components/gameHud/BlockTargetPanel.tsx', // Где кнопка "Читать"
+    'src/components/gameHud/BlockDialogue.tsx', // Как референс для создания окна с текстом
+    'src/components/GameHUD.tsx', // Куда вмонтируем новое окно
+    'src/components/gameHud/hudPorts.ts', // Порты адаптера для связи ECS и React
+    'src/HudAdapter.ts', // Реализация связи
+    'src/core/EventBus.ts',
+  ],
+
+  task_trigger_system: [
+    'src/ecs/types.ts',
+    'src/core/EventBus.ts',
+    'src/ecs/systems/TriggerVolumeSystem.ts', // Источник событий зон
+    'src/ecs/systems/DialogueSystem.ts', // Источник событий диалогов
+    'src/dialogue/StoryFlagsManager.ts', // Хранилище флагов квестов
+    'src/ecs/EntityFactory.ts', // Для экшенов спавна
+    'src/editor/EditorMutationsAPI.ts', // Набор готовых методов для изменения компонентов (смена ИИ, статов и т.д.)
+    'src/ecs/World.ts',
+    'src/ecs/components/zone.ts',
+  ],
+
+  // Новый домен для многосторонних диалогов с ролями
+  dialogueMultiNPC: [
+    'src/dialogue/**/*',
+    'src/ecs/systems/DialogueSystem.ts',
+    'src/ecs/components/dialogue.ts',
+    'src/components/gameHud/BlockDialogue.tsx',
+    'src/components/gameHud/hudPorts.ts',
+    'src/HudAdapter.ts',
     'src/types.ts',
     'src/utils.ts',
   ],

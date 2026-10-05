@@ -62,7 +62,10 @@ export class AISystem implements IAIWorld {
   }
 
   public getEntityPos(id: string): Vec3 | null {
-    const t = this.world.getComponent(id, 'transform');
+    const rawOwner = this.world.getComponent(id, 'ownership')?.ownerId;
+    const rootOwner = rawOwner ? getRootOwner(this.world, rawOwner) : null;
+    const targetEntityId = rootOwner ?? id;
+    const t = this.world.getComponent(targetEntityId, 'transform');
     return t ? { x: t.x, y: t.y, z: t.z } : null;
   }
 
@@ -97,13 +100,14 @@ export class AISystem implements IAIWorld {
 
   public findFetchSticks(masterId: string): FetchStickInfo[] {
     const results: FetchStickInfo[] = [];
-    for (const [sId, comps] of this.world.getEntitiesWith('fetchStick', 'transform')) {
+    for (const [sId, comps] of this.world.getEntitiesWith('fetchStick')) {
       if (comps.fetchStick.ownerMasterId === masterId) {
         const rawOwner = this.world.getComponent(sId, 'ownership')?.ownerId;
         const rootOwner = rawOwner ? getRootOwner(this.world, rawOwner) : undefined;
+        const pos = this.getEntityPos(sId) ?? { x: 0, y: 0, z: 0 };
         results.push({
           id: sId,
-          pos: { x: comps.transform.x, y: comps.transform.y, z: comps.transform.z },
+          pos,
           state: comps.fetchStick.state,
           ownerId: rootOwner ?? undefined,
         });

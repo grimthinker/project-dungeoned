@@ -1070,9 +1070,8 @@ export class ThreeSyncSystem {
     if (targetIdVal) {
       const tIdStr = String(targetIdVal);
       const tOwner = getRootOwner(world, tIdStr);
-      const tTrans =
-        world.getComponent(tIdStr, 'transform') ??
-        (tOwner ? world.getComponent(tOwner, 'transform') : undefined);
+      const targetTransId = tOwner ?? tIdStr;
+      const tTrans = world.getComponent(targetTransId, 'transform');
       if (tTrans) {
         const tMeta =
           world.getComponent(tIdStr, 'meta') ??

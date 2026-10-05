@@ -201,14 +201,15 @@ export function DogFetchTree(): BTNode {
           new BTConditionStringState({ stateKey: 'fetchState', expectedState: 'chasing_item' }),
           new BTActionSetTarget({ sourceKey: 'fetchTargetId' }),
           new BTServicePathUpdater(
-            new BTSelector([
+            new BTReactiveSelector([
               new BTSequence([
                 new BTConditionDistance({ maxDistance: 1.0 }),
-                new BTActionPickup({ targetKey: 'fetchTargetId' }),
+                new BTActionPickup({ targetKey: 'targetId' }),
               ]),
               new BTActionFollow({ stopDist: 0.6, sprintMinDistance: 0 }),
             ])
           ),
+          new BTCommandForgetTarget(),
         ]),
 
         // ВЕТКА 4: Следование за хозяином без палки (шаг рядом с хозяином)
@@ -256,17 +257,19 @@ export function MasterFetchTree(): BTNode {
               new BTConditionMasterCanPickupDeliveredStick(),
               new BTActionSetTarget({ sourceKey: 'nearestDeliveredStickId' }),
               new BTServicePathUpdater(
-                new BTSelector([
+                new BTReactiveSelector([
                   new BTSequence([
                     new BTConditionDistance({ maxDistance: 1.2 }),
-                    new BTActionPickup({ targetKey: 'nearestDeliveredStickId' }),
+                    new BTActionPickup({ targetKey: 'targetId' }),
                   ]),
                   new BTActionFollow({
+                    targetKey: 'targetId',
                     stopDist: 0.6,
                     forceGait: 'walk',
                   }),
                 ])
               ),
+              new BTCommandForgetTarget(),
             ]),
 
             // ВЕТКА 2: Бросок палок

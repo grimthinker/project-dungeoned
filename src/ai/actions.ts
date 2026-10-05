@@ -96,6 +96,7 @@ export class BTActionFollow extends BTAction {
 
   protected onOpen(_entity: IAIAgent): void {
     this.currentGait = this.params.forceGait ?? 'jog';
+    this.isResting = false;
   }
 
   private updateGait(dist: number): MovementGait {
@@ -160,9 +161,32 @@ export class BTActionFollow extends BTAction {
       return NodeStatus.FAILURE;
     }
 
+    if (!entity.world.isEntityAlive(targetId)) {
+      this.isResting = false;
+      entity.clearMoveTarget();
+      return NodeStatus.FAILURE;
+    }
+
+    // Если цель уже удерживается в слотах агента — цель достигнута
+    const slots = entity.getInteractionSlots();
+    if (slots.some((s) => s.itemId === targetId)) {
+      this.isResting = false;
+      entity.clearMoveTarget();
+      return NodeStatus.SUCCESS;
+    }
+
+    // Если предмет перехвачен другим существом — прерываем движение
+    const ownerId = entity.world.getEntityOwnerId(targetId);
+    if (ownerId && ownerId !== entity.id) {
+      this.isResting = false;
+      entity.clearMoveTarget();
+      return NodeStatus.FAILURE;
+    }
+
     const targetPos = entity.world.getEntityPos(targetId);
     if (!targetPos) {
       this.isResting = false;
+      entity.clearMoveTarget();
       return NodeStatus.FAILURE;
     }
 
@@ -819,15 +843,15 @@ export class BTActionPickup extends BTAction {
       return NodeStatus.FAILURE;
     }
 
+    const interaction = entity.getCurrentInteraction();
+    if (interaction?.type === 'pickup') {
+      return NodeStatus.RUNNING;
+    }
+
     const slots = entity.getInteractionSlots();
     const isAlreadyHeld = slots.some((s) => s.itemId === targetId);
     if (isAlreadyHeld) {
       return NodeStatus.SUCCESS;
-    }
-
-    const interaction = entity.getCurrentInteraction();
-    if (interaction?.type === 'pickup') {
-      return NodeStatus.RUNNING;
     }
 
     const targetPos = entity.world.getEntityPos(targetId);
@@ -850,14 +874,6 @@ export class BTActionPickup extends BTAction {
     const yMin = selfPos.y - myBaseHeight * 0.2;
     const yMax = selfPos.y + myBaseHeight * 1.2;
     const isWithinVerticalReach = targetPos.y >= yMin && targetPos.y <= yMax;
-
-    if (distXZ > 0.001 && entity.isAlive) {
-      const targetHeight = entity.world.getEntityHeight(targetId);
-      const targetCenterY = targetPos.y + targetHeight * 0.5;
-      const myHeadY = selfPos.y + myBaseHeight * 0.75;
-      const dy = targetCenterY - myHeadY;
-      entity.setLookTarget(Math.atan2(dz, dx) as Radians, Math.atan2(dy, distXZ) as Radians);
-    }
 
     const interactDist = freeSlot.interactDist ?? 0.6;
     if (distBetweenBorders <= interactDist + 0.1 && isWithinVerticalReach) {
@@ -1137,6 +1153,7 @@ export class BTActionMasterLookAtDog extends BTSimpleAction {
   public static readonly description = 'Поворачивается в сторону приоритетной собаки';
 
   protected onTick(entity: IAIAgent): NodeStatus {
+    entity.clearMoveTarget();
     const bb = entity.blackboard;
     const dogId = bb.get<string>('priorityDogId');
     if (!dogId) return NodeStatus.FAILURE;

@@ -271,6 +271,21 @@ export class InteractionSystem {
         continue;
       }
 
+      // Автоматический поворот корпуса и взгляда к предмету во время действия подбора
+      if (interactionAction.type === 'pickup' && interactionAction.targetId) {
+        const targetTrans = world.getComponent(interactionAction.targetId, 'transform');
+        const input = world.getComponent(id, 'input');
+        if (targetTrans && input) {
+          const dx = targetTrans.x - transform.x;
+          const dz = targetTrans.z - transform.z;
+          if (Math.hypot(dx, dz) > 0.001) {
+            const targetAngle = Math.atan2(dz, dx) as Radians;
+            input.desiredBodyAngle = targetAngle;
+            input.targetLookAngle = targetAngle;
+          }
+        }
+      }
+
       if (interactionAction.type === 'drop') {
         if (interactionAction.phase === 'drop_prep') {
           interactionAction.timer -= localDt;
@@ -401,6 +416,14 @@ export class InteractionSystem {
             const ownerPartId = interactionAction.partId || id;
             world.addComponent(targetId, 'ownership', { ownerId: ownerPartId, status: 'equipped' });
             world.removeComponent(targetId, 'thrownObject');
+
+            const itTransform = world.getComponent(targetId, 'transform');
+            if (itTransform) {
+              itTransform.x = transform.x;
+              itTransform.y = transform.y;
+              itTransform.z = transform.z;
+              itTransform.isDirty = false;
+            }
 
             EventBus.emit('inventory:updated');
 
