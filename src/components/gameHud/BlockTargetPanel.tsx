@@ -141,8 +141,8 @@ export const BlockTargetPanel: React.FC<BlockTargetPanelProps> = ({
         {isCreature && (
           <button
             type="button"
-            style={{ ...RETRO_BUTTON_STYLE, opacity: 0.7 }}
-            onClick={() => alert('Команда «Начать диалог» (заглушка)')}
+            style={RETRO_BUTTON_STYLE}
+            onClick={() => hudProvider.startDialogue(targetId)}
           >
             💬 {t('interaction.startDialogue')}
           </button>

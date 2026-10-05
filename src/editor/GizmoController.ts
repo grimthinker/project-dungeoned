@@ -85,6 +85,9 @@ export class GizmoController {
         t.x = newPos.x;
         t.y = newPos.y;
         t.z = newPos.z;
+        t.prevX = newPos.x;
+        t.prevY = newPos.y;
+        t.prevZ = newPos.z;
         t.rotation = { x: newRot.x, y: newRot.y, z: newRot.z, w: newRot.w };
 
         const siny_cosp = 2 * (newRot.w * newRot.y + newRot.x * newRot.z);

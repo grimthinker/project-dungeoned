@@ -139,6 +139,9 @@ export class EditorMutationsAPI {
     // Делегируем синхронизацию физическому движку через Data-Oriented подход
     if (changed) {
       transform.isDirty = true;
+      transform.prevX = transform.x;
+      transform.prevY = transform.y;
+      transform.prevZ = transform.z;
     }
 
     return changed;

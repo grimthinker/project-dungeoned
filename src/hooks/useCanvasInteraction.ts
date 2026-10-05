@@ -91,7 +91,18 @@ export const useCanvasInteraction = ({
     const isTargeting = appRef.current?.throwTargeting != null;
     container.style.cursor = placementMode || bbPicking || isTargeting ? 'crosshair' : 'default';
 
+    const isTargetOnHUD = (target: EventTarget | null): boolean => {
+      if (!target || !(target instanceof HTMLElement)) return false;
+      const canvas = appRef.current?.canvas;
+      return target !== canvas;
+    };
+
     const onWheel = (e: WheelEvent) => {
+      // Если колесико мыши крутится над панелью HUD — даем панели прокручиваться и не зумим сцену
+      if (isTargetOnHUD(e.target)) {
+        return;
+      }
+
       e.preventDefault();
       if (onClosePieMenu) onClosePieMenu();
       const app = appRef.current;
@@ -129,9 +140,18 @@ export const useCanvasInteraction = ({
     };
   }, [placementMode, onClosePieMenu]);
 
+  const isTargetOnHUD = (target: EventTarget | null): boolean => {
+    if (!target || !(target instanceof HTMLElement)) return false;
+    const canvas = appRef.current?.canvas;
+    return target !== canvas;
+  };
+
   const handleMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
     const app = appRef.current;
     if (!app || mode === GameMode.MENU) return;
+
+    // Игнорируем клики по панелям HUD (панели сами обрабатывают свои кнопки и драг)
+    if (isTargetOnHUD(e.target)) return;
 
     if (onClosePieMenu) onClosePieMenu();
 
@@ -344,6 +364,17 @@ export const useCanvasInteraction = ({
   const handleMouseMove = (e: ReactMouseEvent<HTMLDivElement>) => {
     const app = appRef.current;
     if (!app) return;
+
+    // При наведении на панель HUD в режиме игры сбрасываем прицеливание персонажа
+    if (isTargetOnHUD(e.target)) {
+      if (mode === GameMode.GAME) {
+        GlobalInput.isRmbDown = false;
+        app.simulation.clearPlayerNavigationTarget();
+      }
+      app.setMouseScreenPos(null, null);
+      setCursorWorldPos(null);
+      return;
+    }
 
     if (app.camera.isRotating) {
       app.camera.rotate(e.clientX, e.clientY, app.gameMode === GameMode.GAME);

@@ -538,6 +538,9 @@ export class ThreeRenderer implements IRenderer {
           this.transformControl.setMode(context.editorData.gizmoTool);
         }
 
+        // Синхронизируем положение гизмо с актуальной матрицей меша
+        mesh.updateMatrixWorld();
+
         // Привязка к сетке через Shift
         if (GlobalInput.keys.has('shift')) {
           this.transformControl.setTranslationSnap(EDITOR_CONFIG.gridSnapSize);

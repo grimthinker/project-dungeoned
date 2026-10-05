@@ -14,6 +14,7 @@ export interface RetroWindowProps {
   children: React.ReactNode;
   zIndex?: number;
   storageKey?: string;
+  resizable?: boolean;
 }
 
 export const RetroWindow: React.FC<RetroWindowProps> = ({
@@ -29,6 +30,7 @@ export const RetroWindow: React.FC<RetroWindowProps> = ({
   children,
   zIndex = 90,
   storageKey,
+  resizable = true,
 }) => {
   const effectiveKey = storageKey || `hud_window_${title.replace(/[^a-zA-Zа-яА-Я0-9_]/g, '_')}`;
 
@@ -223,29 +225,31 @@ export const RetroWindow: React.FC<RetroWindowProps> = ({
         {children}
       </div>
 
-      {/* Уголок масштабирования размера окна (Resize Handle): расположен в полосе между светлой фаской контента и темной фаской окна */}
-      <div
-        onMouseDown={handleResizeMouseDown}
-        style={{
-          position: 'absolute',
-          right: 3,
-          bottom: 2,
-          width: 11,
-          height: 11,
-          cursor: 'se-resize',
-          zIndex: 15,
-          display: 'flex',
-          alignItems: 'flex-end',
-          justifyContent: 'flex-end',
-          fontSize: '10px',
-          color: '#222222',
-          lineHeight: '10px',
-          userSelect: 'none',
-        }}
-        title="Потяните для изменения размера"
-      >
-        ◢
-      </div>
+      {/* Уголок масштабирования размера окна (Resize Handle) */}
+      {resizable && (
+        <div
+          onMouseDown={handleResizeMouseDown}
+          style={{
+            position: 'absolute',
+            right: 3,
+            bottom: 2,
+            width: 11,
+            height: 11,
+            cursor: 'se-resize',
+            zIndex: 15,
+            display: 'flex',
+            alignItems: 'flex-end',
+            justifyContent: 'flex-end',
+            fontSize: '10px',
+            color: '#222222',
+            lineHeight: '10px',
+            userSelect: 'none',
+          }}
+          title="Потяните для изменения размера"
+        >
+          ◢
+        </div>
+      )}
     </div>
   );
 };

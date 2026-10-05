@@ -356,19 +356,28 @@ export class ThreeSyncSystem {
             this.scene.add(obj);
           }
 
-          const alpha = Math.min(1.0, physicsAccumulator / fixedDt);
+          const isEditor = _gameMode === GameMode.EDITOR;
+          const shouldInterpolate = !isEditor && fixedDt > 0 && physicsAccumulator > 0;
+          const alpha = shouldInterpolate ? Math.min(1.0, physicsAccumulator / fixedDt) : 1.0;
+
           const renderX =
-            transform.prevX !== undefined
+            transform.prevX !== undefined && shouldInterpolate
               ? transform.prevX + (transform.x - transform.prevX) * alpha
               : transform.x;
           const renderY =
-            transform.prevY !== undefined
+            transform.prevY !== undefined && shouldInterpolate
               ? transform.prevY + (transform.y - transform.prevY) * alpha
               : transform.y;
           const renderZ =
-            transform.prevZ !== undefined
+            transform.prevZ !== undefined && shouldInterpolate
               ? transform.prevZ + (transform.z - transform.prevZ) * alpha
               : transform.z;
+
+          if (!shouldInterpolate) {
+            transform.prevX = transform.x;
+            transform.prevY = transform.y;
+            transform.prevZ = transform.z;
+          }
 
           obj.position.set(renderX, renderY, renderZ);
           if (transform.rotation) {

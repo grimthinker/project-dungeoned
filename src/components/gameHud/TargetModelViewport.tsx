@@ -13,6 +13,7 @@ import {
 } from '../../rendering/renderUtils';
 import { ToonMaterialManager } from '../../rendering/materials/ToonMaterialManager';
 import { IHudDataProvider } from './hudPorts';
+import { BALANCE_CONFIG } from '../../config/balanceConfig';
 
 export interface TargetModelViewportProps {
   app?: GameApp | null;
@@ -237,6 +238,17 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
         const box = computeLocalBox(modelGroup);
         const center = new THREE.Vector3();
         box.getCenter(center);
+
+        if (data.isCreature) {
+          const headBone = loadedObject.getObjectByName('HeadPivot');
+          if (headBone) {
+            headBone.getWorldPosition(center);
+          } else {
+            const headRatio = BALANCE_CONFIG.camera.gameMode.headHeightRatio ?? 0.81;
+            center.y = box.min.y + (box.max.y - box.min.y) * headRatio;
+          }
+        }
+
         targetCenterRef.current.copy(center);
       }
     };
@@ -336,10 +348,22 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
           }
         }
 
-        // В. Расчет ракурса и зума камеры относительно игрока
+        // В. Расчет ракурса и зума камеры относительно игрока (взгляд "глаза-в-глаза")
         if (playerTrans && targetTrans) {
+          // Динамически отслеживаем положение кости головы с учетом текущего кадра анимации
+          if (modelData?.isCreature) {
+            const headBone = rig?.getObjectByName('HeadPivot');
+            if (headBone) {
+              headBone.getWorldPosition(targetCenterRef.current);
+            }
+          }
+
+          const headRatio = BALANCE_CONFIG.camera.gameMode.headHeightRatio ?? 0.81;
+          const playerEyeY = playerTrans.y + 1.8 * headRatio;
+          const targetWorldHeadY = targetTrans.y + targetCenterRef.current.y;
+
           const dx = playerTrans.x - targetTrans.x;
-          const dy = playerTrans.y + 1.6 - (targetTrans.y + targetCenterRef.current.y);
+          const dy = playerEyeY - targetWorldHeadY;
           const dz = playerTrans.z - targetTrans.z;
           const realDist = Math.max(0.6, Math.hypot(dx, dy, dz));
 

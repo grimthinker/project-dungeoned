@@ -597,4 +597,22 @@ export class HudAdapter implements IHudDataProvider {
   public selectTarget(targetId: string | null): void {
     this.app.selection.selectGameTarget(targetId);
   }
+
+  public startDialogue(targetId: string): boolean {
+    const playerId = this.app.getPlayerEntityId();
+    if (!playerId) return false;
+    return this.app.simulation.dialogueSystem.startDialogue(this.world, targetId, playerId);
+  }
+
+  public chooseDialogueOption(choiceId: string): void {
+    this.app.simulation.dialogueSystem.chooseOption(this.world, choiceId);
+  }
+
+  public closeDialogue(): void {
+    this.app.simulation.dialogueSystem.closeDialogue(this.world);
+  }
+
+  public getActiveDialogue(): import('./components/gameHud/hudPorts').ActiveDialogueDTO | null {
+    return this.app.simulation.dialogueSystem.getActiveDialogueDTO(this.world);
+  }
 }

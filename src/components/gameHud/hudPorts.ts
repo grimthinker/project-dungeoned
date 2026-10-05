@@ -1,4 +1,7 @@
 import { Point, Vec3, Radians } from '../../types';
+import { ActiveDialogueDTO } from '../../dialogue/types';
+
+export type { ActiveDialogueDTO };
 
 export interface PlayerPartFpInfo {
   name: string;
@@ -183,4 +186,9 @@ export interface IHudDataProvider {
   throwItem(playerId: string, globalSlotIndex: number): void;
   pickupItem(playerId: string, targetItemId: string): void;
   selectTarget(targetId: string | null): void;
+
+  startDialogue(targetId: string): boolean;
+  chooseDialogueOption(choiceId: string): void;
+  closeDialogue(): void;
+  getActiveDialogue(): ActiveDialogueDTO | null;
 }

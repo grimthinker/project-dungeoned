@@ -17,6 +17,7 @@ import { ModifierSystem } from '../ecs/systems/ModifierSystem';
 import { AttachmentSystem } from '../ecs/systems/AttachmentSystem';
 import { ThreeSyncSystem } from '../ecs/systems/ThreeSyncSystem';
 import { EnvironmentSystem } from '../ecs/systems/EnvironmentSystem';
+import { DialogueSystem } from '../ecs/systems/DialogueSystem';
 import { EntityFactory } from '../ecs/EntityFactory';
 import { WorldSerializer, SerializedWorldData } from '../ecs/WorldSerializer';
 import { IPhysicsDriver } from '../physics/IPhysicsDriver';
@@ -58,6 +59,7 @@ export class GameSimulation {
   public modifierSystem: ModifierSystem;
   public attachmentSystem: AttachmentSystem;
   public environmentSystem: EnvironmentSystem;
+  public dialogueSystem: DialogueSystem;
 
   public entityFactory: EntityFactory;
   public serializer: WorldSerializer;
@@ -86,6 +88,7 @@ export class GameSimulation {
     this.modifierSystem = new ModifierSystem();
     this.attachmentSystem = new AttachmentSystem();
     this.environmentSystem = new EnvironmentSystem();
+    this.dialogueSystem = new DialogueSystem(app);
     this.entityFactory = new EntityFactory();
     this.serializer = new WorldSerializer(app);
 
@@ -206,6 +209,7 @@ export class GameSimulation {
     this.waterSystem.update(dt, this.world, this.physics);
     this.damageSystem.update(dt, this.world);
     this.animationSyncSystem.update(dt, this.world);
+    this.dialogueSystem.update(dt, this.world);
   }
 
   public getPlayerEntityId(): string | null {
@@ -497,6 +501,7 @@ export class GameSimulation {
   }
 
   public clearWorld(): void {
+    this.dialogueSystem.closeDialogue(this.world);
     this.playerEntityId = null;
     const entities = this.world.getAllEntities();
     for (const [id, comp] of entities) {

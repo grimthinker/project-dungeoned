@@ -13,6 +13,9 @@ import { BlockCompass } from './gameHud/BlockCompass';
 import { GameMenuModal } from './gameHud/GameMenuModal';
 import { BlockTargetPanel } from './gameHud/BlockTargetPanel';
 import { EntityInfoWindow } from './gameHud/EntityInfoWindow';
+import { BlockDialogue } from './gameHud/BlockDialogue';
+import { ActiveDialogueDTO } from './gameHud/hudPorts';
+import { EventBus } from '../core/EventBus';
 import { GAMEPLAY_CONFIG } from '../config/gameplayConfig';
 
 export interface GameHUDProps {
@@ -44,9 +47,25 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const [isLogOpen, setIsLogOpen] = useState(true);
   const [isFullMapOpen, setIsFullMapOpen] = useState(false);
   const [isGameMenuOpen, setIsGameMenuOpen] = useState(false);
+  const [activeDialogue, setActiveDialogue] = useState<ActiveDialogueDTO | null>(() =>
+    hudProvider ? hudProvider.getActiveDialogue() : null
+  );
 
   const [infoWindows, setInfoWindows] = useState<InfoWindowState[]>([]);
   const maxZIndexRef = useRef<number>(100);
+
+  useEffect(() => {
+    const unsubState = EventBus.on('dialogue:state-changed', (dto) => {
+      setActiveDialogue(dto);
+    });
+    const unsubClosed = EventBus.on('dialogue:closed', () => {
+      setActiveDialogue(null);
+    });
+    return () => {
+      unsubState();
+      unsubClosed();
+    };
+  }, []);
 
   const playerId = app ? app.getPlayerEntityId() : null;
 
@@ -195,6 +214,15 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           hudProvider={hudProvider}
           targetId={selectedEntityId}
           onOpenInspect={handleOpenInspect}
+        />
+      )}
+
+      {/* Окно диалога с NPC */}
+      {activeDialogue && (
+        <BlockDialogue
+          hudProvider={hudProvider}
+          activeDialogue={activeDialogue}
+          onClose={() => hudProvider.closeDialogue()}
         />
       )}
 

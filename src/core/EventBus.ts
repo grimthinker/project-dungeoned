@@ -1,6 +1,7 @@
 import { BTNodeDTO } from '../ai/core';
 import { GameMode } from '../config/gameConfig';
 import { TreeBBSchema } from '../ai/schema';
+import { ActiveDialogueDTO } from '../dialogue/types';
 
 export interface EventMap {
   'engine:state-changed': {
@@ -38,6 +39,8 @@ export interface EventMap {
   'input:cancelTargeting': void;
   'zone:entered': { zoneId: string; entityId: string };
   'zone:exited': { zoneId: string; entityId: string };
+  'dialogue:state-changed': ActiveDialogueDTO;
+  'dialogue:closed': void;
 }
 
 type EventCallback<T> = (data: T) => void;
