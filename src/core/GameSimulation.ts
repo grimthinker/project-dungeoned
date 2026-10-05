@@ -149,10 +149,11 @@ export class GameSimulation {
           this.app.selection.selectGameTarget(null);
         } else if (!this.app.throwTargeting && targetTrans) {
           const targetPhys = this.world.getComponent(selectedId, 'physicsStats');
-          const targetH = targetPhys?.height?.current ?? 1.2;
+          const targetH = targetPhys?.height?.current ?? 1.8;
+          const headRatio = BALANCE_CONFIG.camera.gameMode.headHeightRatio ?? 0.88;
           const targetCenter: Vec3 = {
             x: targetTrans.x,
-            y: targetTrans.y + targetH * 0.75,
+            y: targetTrans.y + targetH * headRatio,
             z: targetTrans.z,
           };
           this.updatePlayerAim(targetCenter);
@@ -279,6 +280,7 @@ export class GameSimulation {
     if (playerId) {
       const bb = this.world.getComponent(playerId, 'brain')?.blackboard;
       if (bb) {
+        bb.remove('followTargetId');
         bb.set('navTargetPos', targetPos);
       }
     }

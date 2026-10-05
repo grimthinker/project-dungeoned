@@ -455,8 +455,11 @@ export const ru = {
   },
   interaction: {
     targetPanelTitle: 'ЦЕЛЬ',
+    startDialogue: 'Начать диалог',
+    read: 'Читать',
     inspect: 'Осмотреть',
     follow: 'Следовать',
+    stopFollow: 'Прекратить следовать',
     take: 'Взять',
     push: 'Толкнуть',
     deselect: 'Отменить выбор',

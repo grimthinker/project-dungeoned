@@ -2,7 +2,7 @@ import {
   BTActionAttack,
   BTCommandForgetTarget,
   BTActionPatrol,
-  BTActionPursue,
+  BTActionFollow,
   BTConditionValidTarget,
   BTCommandAcceptCandidate,
   BTConditionEngaged,
@@ -27,6 +27,7 @@ import {
   BTConditionMasterShouldFollowDog,
   BTActionMasterLookAtDog,
   BTActionFollowPathSmooth,
+  BTConditionHasFollowTarget,
 } from './actions';
 import { BTSelector, BTReactiveSelector, BTSequence } from './composites';
 import { BTNode, BTService } from './core';
@@ -83,6 +84,15 @@ export function PlayerTree(): BTNode {
       new BTServiceBodyTurnOnLookLimit(
         new BTServicePathUpdater(
           new BTReactiveSelector([
+            new BTSequence([
+              new BTConditionHasFollowTarget(),
+              new BTActionFollow({
+                targetKey: 'followTargetId',
+                stopDist: 2.2,
+                resumeDist: 3.2,
+                lookAtTarget: false,
+              }),
+            ]),
             new BTActionDropItem(),
             new BTActionPickupItem(),
             new BTActionFollowPathSmooth('currentPath'),
@@ -104,7 +114,7 @@ export function CombatTree(): BTNode {
         new BTActionAttack(),
       ]),
 
-      new BTActionPursue(),
+      new BTActionFollow(),
     ])
   );
 }
@@ -136,7 +146,7 @@ export function FollowerTree(): BTNode {
           new BTServicePathUpdater(
             new BTSelector([
               new BTSequence([new BTConditionEngaged(), new BTActionRotateToPos()]),
-              new BTActionPursue(),
+              new BTActionFollow(),
             ])
           ),
         ]),
@@ -161,7 +171,7 @@ export function DogFetchTree(): BTNode {
           new BTActionSetTarget({ sourceKey: 'masterEntityId' }),
           new BTServicePathUpdater(
             new BTSequence([
-              new BTActionPursue({
+              new BTActionFollow({
                 stopDist: 2.2,
                 walkDistance: 5.0,
                 sprintMinDistance: undefined,
@@ -186,14 +196,17 @@ export function DogFetchTree(): BTNode {
           ]),
         ]),
 
-        // ВЕТКА 3: Погоня за брошенной палкой (спринт)
+        // ВЕТКА 3: Погоня за брошенной палкой (спринт с селектором дистанции)
         new BTSequence([
           new BTConditionStringState({ stateKey: 'fetchState', expectedState: 'chasing_item' }),
           new BTActionSetTarget({ sourceKey: 'fetchTargetId' }),
           new BTServicePathUpdater(
-            new BTSequence([
-              new BTActionPursue({ stopDist: 0.6, sprintMinDistance: 0 }),
-              new BTActionPickup({ targetKey: 'fetchTargetId' }),
+            new BTSelector([
+              new BTSequence([
+                new BTConditionDistance({ maxDistance: 1.0 }),
+                new BTActionPickup({ targetKey: 'fetchTargetId' }),
+              ]),
+              new BTActionFollow({ stopDist: 0.6, sprintMinDistance: 0 }),
             ])
           ),
         ]),
@@ -205,7 +218,7 @@ export function DogFetchTree(): BTNode {
           new BTServicePathUpdater(
             new BTSelector([
               new BTSequence([new BTConditionEngaged(), new BTActionRotateToPos()]),
-              new BTActionPursue({
+              new BTActionFollow({
                 stopDist: 2.5,
                 walkDistance: 5.5,
                 sprintMinDistance: 12.0,
@@ -238,17 +251,20 @@ export function MasterFetchTree(): BTNode {
       new BTServiceBodyTurnOnLookLimit(
         new BTServiceFetchMasterWatcher(
           new BTReactiveSelector([
-            // ВЕТКА 1: Подбор принесенных палок
+            // ВЕТКА 1: Подбор принесенных палок (с выбором: взять если близко, иначе идти за ней)
             new BTSequence([
               new BTConditionMasterCanPickupDeliveredStick(),
               new BTActionSetTarget({ sourceKey: 'nearestDeliveredStickId' }),
               new BTServicePathUpdater(
-                new BTSequence([
-                  new BTActionPursue({
+                new BTSelector([
+                  new BTSequence([
+                    new BTConditionDistance({ maxDistance: 1.2 }),
+                    new BTActionPickup({ targetKey: 'nearestDeliveredStickId' }),
+                  ]),
+                  new BTActionFollow({
                     stopDist: 0.6,
                     forceGait: 'walk',
                   }),
-                  new BTActionPickup({ targetKey: 'nearestDeliveredStickId' }),
                 ])
               ),
             ]),
@@ -287,7 +303,7 @@ export function MasterFetchTree(): BTNode {
               new BTConditionMasterShouldFollowDog(),
               new BTActionSetTarget({ sourceKey: 'priorityDogId' }),
               new BTServicePathUpdater(
-                new BTActionPursue({
+                new BTActionFollow({
                   stopDist: 5.0,
                   forceGait: 'walk',
                 })

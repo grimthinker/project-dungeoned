@@ -431,6 +431,7 @@ export class BTServiceInputController extends BTService {
 
     const bb = entity.blackboard;
     const keys = bb.get<string[]>('pressedKeys') || [];
+
     const keysSet = new Set(keys);
 
     if (keysSet.has('v')) {

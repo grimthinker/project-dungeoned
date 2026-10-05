@@ -140,7 +140,7 @@ export const BALANCE_CONFIG = {
       distanceSmoothSpeed: 10.0,
 
       /** Множитель высоты положения головы относительно текущего роста существа */
-      headHeightRatio: 0.88,
+      headHeightRatio: 0.81,
     },
   },
   items: {

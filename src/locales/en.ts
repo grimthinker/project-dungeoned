@@ -454,8 +454,11 @@ export const en = {
   },
   interaction: {
     targetPanelTitle: 'TARGET',
+    startDialogue: 'Start Dialogue',
+    read: 'Read',
     inspect: 'Inspect',
     follow: 'Follow',
+    stopFollow: 'Stop Following',
     take: 'Take',
     push: 'Push',
     deselect: 'Deselect',

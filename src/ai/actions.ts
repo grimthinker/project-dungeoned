@@ -62,21 +62,24 @@ export class BTConditionEngaged extends BTSimpleAction {
 
 type MovementGait = 'sprint' | 'jog' | 'walk';
 
-export class BTActionPursue extends BTAction {
+export class BTActionFollow extends BTAction {
   public static readonly defaultParams = {
+    targetKey: 'targetId' as string,
     stopDist: LOGIC_CONFIG.followStopDist,
+    resumeDist: undefined as number | undefined,
     sprintMinDistance: undefined as number | undefined,
     walkDistance: undefined as number | undefined,
     forceGait: undefined as MovementGait | undefined,
     hysteresis: 1.0,
     lookAtTarget: true,
   };
-  private params: typeof BTActionPursue.defaultParams;
+  private params: typeof BTActionFollow.defaultParams;
   private movementNode: BTActionFollowPathSmooth = new BTActionFollowPathSmooth('currentPath');
   private stopDistSq: number;
   private currentGait: MovementGait = 'jog';
+  private isResting: boolean = false;
 
-  public static readonly nodeName = 'Преследовать цель';
+  public static readonly nodeName = 'Следовать за целью';
   public static readonly description = 'Преследовать цель, если она есть и есть путь currentPath';
   public static readonly bbSchema: NodeBBSchema = {
     reads: {
@@ -85,9 +88,9 @@ export class BTActionPursue extends BTAction {
     },
   };
 
-  constructor(params?: Partial<typeof BTActionPursue.defaultParams>) {
+  constructor(params?: Partial<typeof BTActionFollow.defaultParams>) {
     super();
-    this.params = { ...BTActionPursue.defaultParams, ...params };
+    this.params = { ...BTActionFollow.defaultParams, ...params };
     this.stopDistSq = this.params.stopDist ** 2;
   }
 
@@ -150,17 +153,43 @@ export class BTActionPursue extends BTAction {
 
   protected onTick(entity: IAIAgent): NodeStatus {
     const bb = entity.blackboard;
-    const targetId = bb.get<string>('targetId');
-    if (targetId === undefined) return NodeStatus.FAILURE;
+    const targetKey = this.params.targetKey ?? 'targetId';
+    const targetId = bb.get<string>(targetKey);
+    if (targetId === undefined) {
+      this.isResting = false;
+      return NodeStatus.FAILURE;
+    }
 
     const targetPos = entity.world.getEntityPos(targetId);
-    if (!targetPos) return NodeStatus.FAILURE;
+    if (!targetPos) {
+      this.isResting = false;
+      return NodeStatus.FAILURE;
+    }
 
     const selfPos = entity.getPos();
     const dx = targetPos.x - selfPos.x;
     const dz = targetPos.z - selfPos.z;
     const distSq = dx * dx + dz * dz;
     const dist = Math.hypot(dx, dz);
+
+    const stopD = this.params.stopDist;
+    const resumeD = this.params.resumeDist ?? stopD + 1.0;
+
+    if (this.isResting) {
+      if (dist <= resumeD) {
+        entity.clearMoveTarget();
+        return NodeStatus.SUCCESS;
+      } else {
+        this.isResting = false;
+      }
+    }
+
+    if (distSq <= this.stopDistSq || dist <= stopD) {
+      this.isResting = true;
+      entity.clearMoveTarget();
+      this.currentGait = 'jog';
+      return NodeStatus.SUCCESS;
+    }
 
     const hasCustomGait =
       this.params.forceGait !== undefined ||
@@ -178,12 +207,6 @@ export class BTActionPursue extends BTAction {
 
     bb.set('gaitRun', run);
     bb.set('gaitWalk', slowWalk);
-
-    if (distSq <= this.stopDistSq) {
-      entity.clearMoveTarget();
-      this.currentGait = 'jog';
-      return NodeStatus.SUCCESS;
-    }
 
     const path = bb.get<Vec3[]>('currentPath');
     if (path && path.length > 0) {
@@ -1211,5 +1234,20 @@ export class BTActionGetRandomPointInZone extends BTSimpleAction {
 
     bb.set(this.params.targetPosKey, point);
     return NodeStatus.SUCCESS;
+  }
+}
+
+export class BTConditionHasFollowTarget extends BTSimpleAction {
+  public static readonly nodeName = 'Проверка цели следования';
+  public static readonly description = 'Проверяет наличие живой цели в ключе followTargetId';
+
+  protected onTick(entity: IAIAgent): NodeStatus {
+    const bb = entity.blackboard;
+    const targetId = bb.get<string>('followTargetId');
+    if (targetId && entity.world.isEntityAlive(targetId)) {
+      return NodeStatus.SUCCESS;
+    }
+    bb.remove('followTargetId');
+    return NodeStatus.FAILURE;
   }
 }

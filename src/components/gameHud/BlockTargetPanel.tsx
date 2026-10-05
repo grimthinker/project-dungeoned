@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { GameApp } from '../../GameApp';
 import { TargetModelViewport } from './TargetModelViewport';
 import { RETRO_PANEL_STYLE, RETRO_HEADER_STYLE, RETRO_BUTTON_STYLE } from './RetroStyles';
 import { t } from '../../locales';
 import { IHudDataProvider } from './hudPorts';
+import { EventBus } from '../../core/EventBus';
 
 export interface BlockTargetPanelProps {
   app?: GameApp | null;
@@ -18,11 +19,47 @@ export const BlockTargetPanel: React.FC<BlockTargetPanelProps> = ({
   targetId,
   onOpenInspect,
 }) => {
+  const [isFollowing, setIsFollowing] = useState(false);
   const targetInfo = hudProvider.getTargetPanelInfo(targetId);
   if (!targetInfo) return null;
 
   const playerId = app ? app.getPlayerEntityId() : null;
   const { name: targetName, isCreature, isItem } = targetInfo;
+
+  useEffect(() => {
+    const checkFollowing = () => {
+      const pId = app ? app.getPlayerEntityId() : null;
+      const brain = pId ? app?.world.getComponent(pId, 'brain') : null;
+      const fId = brain?.blackboard.get<string | undefined>('followTargetId');
+      setIsFollowing(fId === targetId);
+    };
+
+    checkFollowing();
+
+    // Подписываемся на события обновления мира и изменения состояния двигателя
+    const unsubWorld = EventBus.on('world:updated', checkFollowing);
+    const unsubState = EventBus.on('engine:state-changed', checkFollowing);
+
+    return () => {
+      unsubWorld();
+      unsubState();
+    };
+  }, [app, targetId]);
+
+  const handleToggleFollow = () => {
+    if (!playerId) return;
+    const brain = app?.world.getComponent(playerId, 'brain');
+    if (!brain) return;
+
+    const currentFId = brain.blackboard.get<string | undefined>('followTargetId');
+    if (currentFId === targetId) {
+      brain.blackboard.remove('followTargetId');
+      setIsFollowing(false);
+    } else {
+      app?.updateEntityBlackboard(playerId, 'followTargetId', targetId);
+      setIsFollowing(true);
+    }
+  };
 
   const handleTake = () => {
     if (playerId) {
@@ -101,6 +138,24 @@ export const BlockTargetPanel: React.FC<BlockTargetPanelProps> = ({
 
       {/* Кнопки действий цели */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {isCreature && (
+          <button
+            type="button"
+            style={{ ...RETRO_BUTTON_STYLE, opacity: 0.7 }}
+            onClick={() => alert('Команда «Начать диалог» (заглушка)')}
+          >
+            💬 {t('interaction.startDialogue')}
+          </button>
+        )}
+
+        <button
+          type="button"
+          style={{ ...RETRO_BUTTON_STYLE, opacity: 0.7 }}
+          onClick={() => alert('Команда «Читать» (заглушка)')}
+        >
+          📖 {t('interaction.read')}
+        </button>
+
         <button type="button" style={RETRO_BUTTON_STYLE} onClick={() => onOpenInspect(targetId)}>
           🔍 {t('interaction.inspect')}
         </button>
@@ -112,12 +167,8 @@ export const BlockTargetPanel: React.FC<BlockTargetPanelProps> = ({
         )}
 
         {isCreature && (
-          <button
-            type="button"
-            style={{ ...RETRO_BUTTON_STYLE, opacity: 0.7 }}
-            onClick={() => alert('Команда «Следовать» (заглушка)')}
-          >
-            🚶 {t('interaction.follow')}
+          <button type="button" style={RETRO_BUTTON_STYLE} onClick={handleToggleFollow}>
+            🚶 {isFollowing ? t('interaction.stopFollow') : t('interaction.follow')}
           </button>
         )}
 
