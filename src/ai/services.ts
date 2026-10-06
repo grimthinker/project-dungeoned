@@ -415,6 +415,8 @@ export class BTServiceInputController extends BTService {
     entity.clearLookTarget();
     entity.clearBodyAngleTarget();
     entity.cancelAttack();
+    const input = (entity as any).worldEcs?.getComponent((entity as any).id, 'input');
+    if (input) input.wantsJump = false;
     super.onAbort(entity);
   }
 
@@ -423,6 +425,8 @@ export class BTServiceInputController extends BTService {
     entity.clearLookTarget();
     entity.clearBodyAngleTarget();
     entity.cancelAttack();
+    const input = (entity as any).worldEcs?.getComponent((entity as any).id, 'input');
+    if (input) input.wantsJump = false;
     super.onClose(entity);
   }
 
@@ -433,6 +437,10 @@ export class BTServiceInputController extends BTService {
     const keys = bb.get<string[]>('pressedKeys') || [];
 
     const keysSet = new Set(keys);
+
+    if (keysSet.has(' ')) {
+      entity.intentJump();
+    }
 
     if (keysSet.has('v')) {
       entity.setStance('prone');

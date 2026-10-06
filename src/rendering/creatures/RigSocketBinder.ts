@@ -90,16 +90,13 @@ export class RigSocketBinder {
 
     for (const itemId of equippedTorsoItemIds) {
       const itemObj = meshes.get(itemId);
-      if (itemObj && itemObj.parent !== torsoBone) {
-        torsoBone.add(itemObj);
-        const grip = itemObj.userData.gripTransform as GripTransform | undefined;
-        if (grip) {
-          itemObj.position.copy(grip.position);
-          itemObj.quaternion.copy(grip.quaternion);
-        } else {
-          itemObj.position.set(0, 0, -0.22);
-          itemObj.rotation.set(0, Math.PI, 0);
+      if (itemObj) {
+        if (itemObj.parent !== torsoBone) {
+          torsoBone.add(itemObj);
         }
+
+        itemObj.position.set(0, 0, -0.22);
+        itemObj.quaternion.setFromEuler(new THREE.Euler(0, Math.PI, 0));
       }
     }
   }

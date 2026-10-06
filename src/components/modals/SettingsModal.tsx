@@ -278,6 +278,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                   <option value="64">64 (Low)</option>
                   <option value="128">128 (Medium)</option>
                   <option value="256">256 (High)</option>
+                  <option value="512">512 (Ultra)</option>
                 </select>
               </label>
               <label style={labelStyle}>

@@ -228,6 +228,26 @@ export class ThreeSyncSystem {
 
   public applySettings(): void {
     this.grassSync.densityFactor = GRASS_CONFIG.defaultDensityFactor;
+
+    const newRes = GRAPHICS_CONFIG.water.ripples.resolution;
+    for (const [, obj] of this.meshes.entries()) {
+      if (obj.userData.rippleManager) {
+        obj.userData.rippleManager.setResolution(newRes);
+      }
+      obj.traverse((child) => {
+        if (
+          child instanceof THREE.Mesh &&
+          child.material &&
+          (child.material as any).uniforms?.uRippleTexel
+        ) {
+          (child.material as any).uniforms.uRippleTexel.value.set(1.0 / newRes, 1.0 / newRes);
+          if ((child.material as any).uniforms.tRipple && obj.userData.rippleManager) {
+            (child.material as any).uniforms.tRipple.value =
+              obj.userData.rippleManager.getTexture();
+          }
+        }
+      });
+    }
   }
 
   public destroy(): void {
@@ -311,8 +331,9 @@ export class ThreeSyncSystem {
     for (const [id, { transform, renderable }] of renderables) {
       const ownership = world.getComponent(id, 'ownership');
 
-      // Предмет находится в руке, если его держит ячейка взаимодействия части тела или существа
+      // Предмет находится в руке или экипирован на туловище/спину
       let isEquippedInHand = false;
+      let isEquippedOnTorso = false;
       if (ownership && ownership.status === 'equipped') {
         const directSlot = world.getComponent(ownership.ownerId, 'interactionSlots');
         if (directSlot && directSlot.itemId === id) {
@@ -331,10 +352,20 @@ export class ThreeSyncSystem {
             }
           }
         }
+
+        const ownerEquip = world.getComponent(ownership.ownerId, 'equip');
+        if (ownerEquip?.equipmentAreas) {
+          for (const area of ownerEquip.equipmentAreas) {
+            if ((area.type === 'torso' || area.id === 'torso') && area.itemIds.includes(id)) {
+              isEquippedOnTorso = true;
+              break;
+            }
+          }
+        }
       }
 
-      // Экипированные в руки предметы не отбрасываются из рендера, даже если скрыты на полу
-      if (!renderable.isVisible && !isEquippedInHand) continue;
+      // Экипированные в руки или на туловище предметы не отбрасываются из рендера, даже если скрыты на полу
+      if (!renderable.isVisible && !isEquippedInHand && !isEquippedOnTorso) continue;
 
       activeIds.add(id);
 
@@ -358,8 +389,8 @@ export class ThreeSyncSystem {
 
       // 2. Обновление состояния меша
       if (obj) {
-        // Если предмет не находится в руке, гарантируем его нахождение в корне сцены
-        if (!isEquippedInHand) {
+        // Если предмет не находится в руке и не надет на туловище, гарантируем его нахождение в корне сцены
+        if (!isEquippedInHand && !isEquippedOnTorso) {
           if (obj.parent !== this.scene) {
             this.scene.add(obj);
           }
@@ -488,7 +519,7 @@ export class ThreeSyncSystem {
           } else {
             obj.scale.set(1, 1, 1);
           }
-        } else {
+        } else if (isEquippedInHand) {
           // Применяем рассчитанную точку хвата (Grip Transform)
           const grip = obj.userData.gripTransform as GripTransform | undefined;
           if (grip) {
@@ -498,6 +529,8 @@ export class ThreeSyncSystem {
             obj.position.set(0, 0, 0);
             obj.rotation.set(0, 0, 0);
           }
+          obj.scale.set(1, 1, 1);
+        } else if (isEquippedOnTorso) {
           obj.scale.set(1, 1, 1);
         }
 

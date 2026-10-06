@@ -98,6 +98,7 @@ export interface IAIAgent {
   // Актуаторы: Движение
   clearMoveTarget(): void;
   setMoveTarget(dx: number, dz: number, run?: boolean, slowWalk?: boolean): void;
+  intentJump(): void;
 
   // Актуаторы: Взгляд и корпус
   setLookTarget(yaw: Radians, pitch?: Radians): void;

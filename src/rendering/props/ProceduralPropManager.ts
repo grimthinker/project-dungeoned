@@ -24,7 +24,6 @@ export class ProceduralPropManager {
     }
 
     let prop: THREE.Group | null = null;
-    console.log(name);
     if (name === 'sword') {
       prop = this.buildSword();
     } else if (name === 'tree') {

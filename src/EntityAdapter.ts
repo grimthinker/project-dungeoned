@@ -170,6 +170,13 @@ export class EntityAdapter implements IAIAgent {
     }
   }
 
+  public intentJump(): void {
+    const input = this.worldEcs.getComponent(this.id, 'input');
+    if (input) {
+      input.wantsJump = true;
+    }
+  }
+
   public setLookTarget(yaw: Radians, pitch?: Radians): void {
     const input = this.worldEcs.getComponent(this.id, 'input');
     if (input) {

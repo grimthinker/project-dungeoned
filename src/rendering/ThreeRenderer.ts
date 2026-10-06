@@ -298,10 +298,8 @@ export class ThreeRenderer implements IRenderer {
       const child = this.scene.children[i];
       if (
         child.userData.isSkyDome ||
-        child.userData.isTerrainMesh ||
         child.userData.isTerrainSkirt ||
         child.userData.isGrassMesh ||
-        child.userData.entityId === 'terrain' ||
         child.userData.entityId === 'environment' ||
         child instanceof THREE.GridHelper ||
         child === this.brushCursor ||

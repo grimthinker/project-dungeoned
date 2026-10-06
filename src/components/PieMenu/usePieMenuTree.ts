@@ -429,6 +429,8 @@ export function usePieMenuTree({
                 const id = app.spawnEntity(
                   {
                     tag: { archetype: 'item', subType: 'bag' },
+                    meta: { name: t('palette.backpack'), entityType: 'item' },
+                    visualModel: { modelId: 'proc://prop/backpack' },
                     item: {
                       name: t('palette.backpack'),
                       type: 'bag',
@@ -438,7 +440,7 @@ export function usePieMenuTree({
                       equippable: true,
                       equipTimeMultiplier: 1.0,
                     },
-                    physics: { radius: 0.4, weight: 1, isSolid: true },
+                    physics: { radius: 0.35, height: 0.5, weight: 1.5, isSolid: true },
                     inventory: { size: { width: 6, height: 4 } },
                   },
                   worldPos

@@ -151,22 +151,6 @@ export class WaterRippleManager {
     rippleSpeed: number = 1.0,
     rippleDamping: number = GRAPHICS_CONFIG.water.ripples.damping
   ): void {
-    const texelSize = this.simSize / this.resolution;
-    const snappedX = Math.floor(camX / texelSize) * texelSize;
-    const snappedZ = Math.floor(camZ / texelSize) * texelSize;
-
-    if (this.isFirstFrame) {
-      this.lastCenter.set(snappedX, snappedZ);
-      this.isFirstFrame = false;
-    }
-
-    const offsetX = (snappedX - this.lastCenter.x) / this.simSize;
-    const offsetZ = (snappedZ - this.lastCenter.y) / this.simSize;
-    this.simMaterial.uniforms.uOffset.value.set(offsetX, offsetZ);
-
-    this.center.set(snappedX, snappedZ);
-    this.lastCenter.set(snappedX, snappedZ);
-
     const count = Math.min(32, disturbances.length);
 
     // 1. Управление сном (Dormant Mode): если в воде никого нет и волны растворились — полностью выключаем расчет
@@ -196,7 +180,24 @@ export class WaterRippleManager {
       this.simAccumulator - targetSimInterval
     );
 
-    // 3. Физически точный расчет коэффициента скорости на основе размера ячеек
+    // 3. Обновление координат сетки и применение смещения только в активный шаг симуляции
+    const texelSize = this.simSize / this.resolution;
+    const snappedX = Math.floor(camX / texelSize) * texelSize;
+    const snappedZ = Math.floor(camZ / texelSize) * texelSize;
+
+    if (this.isFirstFrame) {
+      this.lastCenter.set(snappedX, snappedZ);
+      this.center.set(snappedX, snappedZ);
+      this.isFirstFrame = false;
+    }
+
+    const offsetX = (snappedX - this.lastCenter.x) / this.simSize;
+    const offsetZ = (snappedZ - this.lastCenter.y) / this.simSize;
+
+    this.center.set(snappedX, snappedZ);
+    this.lastCenter.set(snappedX, snappedZ);
+
+    // 4. Физически точный расчет коэффициента скорости на основе размера ячеек
     const physicalDx = this.simSize / this.resolution;
     const physicalSpeed = 2.5 * Math.max(0.1, rippleSpeed);
 
@@ -233,8 +234,15 @@ export class WaterRippleManager {
 
     const prevTarget = renderer.getRenderTarget();
 
-    // 4. Выполнение легкого шага симуляции
+    // 5. Выполнение легкого шага симуляции
     for (let step = 0; step < subSteps; step++) {
+      // Применяем адвекцию текстуры только на самом первом микрошаге
+      if (step === 0) {
+        this.simMaterial.uniforms.uOffset.value.set(offsetX, offsetZ);
+      } else {
+        this.simMaterial.uniforms.uOffset.value.set(0.0, 0.0);
+      }
+
       this.simMaterial.uniforms.uDisturbanceCount.value = step === 0 ? count : 0;
       this.simMaterial.uniforms.tPrev.value = this.readTarget.texture;
 
