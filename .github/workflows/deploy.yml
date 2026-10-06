@@ -24,12 +24,10 @@ jobs:
           bun install --frozen-lockfile
           bun run build
 
-      # 4. Выгружаем собранную папку dist на itch.io
-      - name: Deploy to Itch.io
-        uses: yeslayla/butler-publish-itchio-action@v1.2.0
-        with:
-          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
-          CHANNEL: html5
-          ITCH_GAME: dungeoned
-          ITCH_USER: grimthinker
-          PACKAGE: dist
+      - name: Setup Butler
+        uses: remarkablegames/setup-butler@v2
+
+      - name: Upload Build to itch.io
+        run: butler push dist grimthinker/dungeoned:html5
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
