@@ -26,7 +26,7 @@ jobs:
 
       # 4. Выгружаем собранную папку dist на itch.io
       - name: Deploy to Itch.io
-        uses: [yeslayla/butler-publish-itchio-action](https://github.com/marketplace/actions/butler-push)@v1.2.0
+        uses: yeslayla/butler-publish-itchio-action@v1.2.0
         with:
           BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
           CHANNEL: html5
