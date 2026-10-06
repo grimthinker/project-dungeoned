@@ -43,6 +43,7 @@ export function createWaterMaterial(
       uWaveHeight: { value: comp.waveHeight ?? 0.12 },
       uFlowDirection: { value: flowDir },
       uFlowSpeed: { value: comp.flowSpeed ?? 0.0 },
+      uFoamIntensity: { value: comp.foamIntensity ?? 1.0 },
       // Интерактивная рябь: инициализируем null для предотвращения попытки клонирования RenderTarget текстуры
       tRipple: { value: null },
       uRippleTexel: { value: new THREE.Vector2(1.0 / rippleRes, 1.0 / rippleRes) },
@@ -149,6 +150,7 @@ export function createWaterMaterial(
       uniform float uFlowSpeed;
       uniform float uWaveHeight;
       uniform float uWaveSpeed;
+      uniform float uFoamIntensity;
 
       uniform vec3 uSunDirection;
       uniform vec3 uSunColor;
@@ -261,7 +263,7 @@ export function createWaterMaterial(
 
         vec3 proceduralNormal = vec3(-dH_dx, 0.0, -dH_dz);
 
-        float totalFoam = clamp(max(waveFoam, shoreFoam * 0.85) + wakeFoam * 0.5, 0.0, 0.85);
+        float totalFoam = clamp((max(waveFoam, shoreFoam * 0.85) + wakeFoam * 0.5) * uFoamIntensity, 0.0, 0.85);
         // Мягкое смешивание цвета пены без аддитивного пересвета
         waterBase = mix(waterBase, vec3(0.85, 0.95, 1.0), totalFoam);
 

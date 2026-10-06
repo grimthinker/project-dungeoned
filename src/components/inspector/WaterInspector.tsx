@@ -303,7 +303,24 @@ export const WaterInspector: React.FC<WaterInspectorProps> = ({
         </label>
       </div>
 
-      {/* Параметры волн */}
+      {/* Параметры волн и пены */}
+      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span>Интенсивность пены:</span>
+          <span style={{ color: '#ecf0f1' }}>{(values.foamIntensity ?? 1.0).toFixed(2)}x</span>
+        </div>
+        <input
+          disabled={isReadOnly}
+          type="range"
+          min="0.0"
+          max="3.0"
+          step="0.1"
+          value={values.foamIntensity ?? 1.0}
+          onChange={(e) => handleChange({ foamIntensity: parseFloat(e.target.value) })}
+          style={{ accentColor: '#ecf0f1', cursor: 'pointer' }}
+        />
+      </label>
+
       <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span>Высота волн:</span>

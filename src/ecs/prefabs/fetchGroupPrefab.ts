@@ -1,7 +1,7 @@
 import { GameSimulation } from '../../core/GameSimulation';
 import { Vec3, Radians } from '../../types';
 import { EntityConfig } from '../types';
-import { CREATURE_BLUEPRINTS } from '../templates';
+import { CREATURE_BLUEPRINTS, QUADRUPED_HOUND_BLUEPRINT } from '../templates';
 import { getTerrainHeightAt, TerrainComponent } from '../components/terrain';
 import { getAnatomyParts } from '../utils/hierarchy';
 import { t } from '../../locales';
@@ -139,14 +139,15 @@ export function spawnFetchGroup(simulation: GameSimulation, origin: Vec3): Spawn
     const dogY = getHeight(dogX, dogZ, origin.y);
 
     const dogPos: Vec3 = { x: dogX, y: dogY, z: dogZ };
-    const dogName = `${baseDogName} ${i + 1}`;
+    const dogName = i === 1 ? `Гончая ${i + 1}` : `${baseDogName} ${i + 1}`;
+    const blueprint = i === 1 ? QUADRUPED_HOUND_BLUEPRINT : CREATURE_BLUEPRINTS.quadruped;
 
     const dogId = entityFactory.spawnModularCreature(
       world,
       physics,
       aiSystem,
       dogPos,
-      CREATURE_BLUEPRINTS.quadruped,
+      blueprint,
       'DogFetchTree',
       dogName
     );

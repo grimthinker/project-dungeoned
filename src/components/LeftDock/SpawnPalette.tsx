@@ -20,6 +20,12 @@ import {
   createBridgeConfig,
   createLampPostConfig,
   createWellConfig,
+  createDoghouseConfig,
+  createLargeBridgeConfig,
+  createBoatConfig,
+  createDockConfig,
+  createWoodenBoxConfig,
+  createInvisibleWallConfig,
 } from '../../ecs/archetypes/ObstacleArchetype';
 import { createWaterConfig } from '../../ecs/archetypes/WaterArchetype';
 import { createRectanglePoints, deg2Rad } from '../../utils';
@@ -532,6 +538,20 @@ export const SpawnPalette: React.FC<SpawnPaletteProps> = ({
               createConfig: () => createHouseConfig(),
             },
             {
+              id: 'obstacle_large_bridge',
+              name: t('palette.largeBridge'),
+              description: t('palette.largeBridgeDesc'),
+              icon: '🌉',
+              createConfig: () => createLargeBridgeConfig(),
+            },
+            {
+              id: 'obstacle_doghouse',
+              name: t('palette.doghouse'),
+              description: t('palette.doghouseDesc'),
+              icon: '🏠',
+              createConfig: () => createDoghouseConfig(),
+            },
+            {
               id: 'obstacle_bridge',
               name: t('palette.bridge'),
               description: t('palette.bridgeDesc'),
@@ -551,6 +571,27 @@ export const SpawnPalette: React.FC<SpawnPaletteProps> = ({
           id: 'other',
           title: t('palette.subgroupOther'),
           items: [
+            {
+              id: 'obstacle_dock',
+              name: t('palette.dock'),
+              description: t('palette.dockDesc'),
+              icon: '⚓',
+              createConfig: () => createDockConfig(),
+            },
+            {
+              id: 'obstacle_boat',
+              name: t('palette.boat'),
+              description: t('palette.boatDesc'),
+              icon: '🛶',
+              createConfig: () => createBoatConfig(),
+            },
+            {
+              id: 'obstacle_wooden_box',
+              name: t('palette.woodenBox'),
+              description: t('palette.woodenBoxDesc'),
+              icon: '📦',
+              createConfig: () => createWoodenBoxConfig(),
+            },
             {
               id: 'obstacle_signpost',
               name: t('palette.signpost'),
@@ -613,6 +654,19 @@ export const SpawnPalette: React.FC<SpawnPaletteProps> = ({
               description: t('palette.fenceDesc'),
               icon: '🪵',
               createConfig: () => createFenceConfig(2.4),
+            },
+          ],
+        },
+        {
+          id: 'special',
+          title: t('palette.subgroupSpecial'),
+          items: [
+            {
+              id: 'obstacle_invisible_wall',
+              name: t('palette.invisibleWall'),
+              description: t('palette.invisibleWallDesc'),
+              icon: '🧱',
+              createConfig: () => createInvisibleWallConfig(),
             },
           ],
         },

@@ -415,6 +415,26 @@ export const QUADRUPED_BLUEPRINT: CreatureBodyBlueprint = {
   ],
 };
 
+export const QUADRUPED_HOUND_BLUEPRINT: CreatureBodyBlueprint = {
+  ...QUADRUPED_BLUEPRINT,
+  id: 'quadruped',
+  name: 'Гончая (Доберман)',
+  baseHeight: 0.8,
+  baseRadius: 0.32,
+  parts: QUADRUPED_BLUEPRINT.parts.map((p) => ({
+    ...p,
+    meshAsset: `${p.meshAsset}_hound`,
+    config: {
+      ...p.config,
+      physics: {
+        ...p.config.physics,
+        weight: (p.config.physics?.weight ?? 5) * 0.85,
+        radius: (p.config.physics?.radius ?? 0.2) * 0.9,
+      },
+    },
+  })),
+};
+
 export const ARACHNID_BLUEPRINT: CreatureBodyBlueprint = {
   id: 'arachnid',
   name: 'Паукообразный',

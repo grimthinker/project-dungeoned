@@ -44,6 +44,7 @@ export function createWaterConfig(
     flowSpeed: options?.flowSpeed ?? (isRiver ? 2.0 : 0.0),
     density: options?.density ?? 1000,
     viscosity: options?.viscosity ?? 1.5,
+    foamIntensity: options?.foamIntensity ?? 1.0,
   };
 
   return {
@@ -108,6 +109,7 @@ export function assembleWater(
         flowSpeed: 0.0,
         density: 1000,
         viscosity: 1.5,
+        foamIntensity: 1.0,
       };
 
   const width = waterComp.width;

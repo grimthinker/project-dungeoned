@@ -62,6 +62,182 @@ export function createWellConfig(position?: Vec3, angle: Radians = 0 as Radians)
   };
 }
 
+export function createDockConfig(position?: Vec3, angle: Radians = 0 as Radians): EntityConfig {
+  const width = 2.0;
+  const depth = 4.0;
+  const height = 1.5;
+  return {
+    tag: { archetype: 'obstacle', subType: 'dock' },
+    meta: { name: 'Причал', entityType: 'obstacle', destructible: true },
+    visualModel: { modelId: 'proc://prop/dock' },
+    transform: {
+      x: position?.x ?? 0,
+      y: position?.y ?? 0,
+      z: position?.z ?? 0,
+      rotation: { x: 0, y: Math.sin(angle * 0.5), z: 0, w: Math.cos(angle * 0.5) },
+      angle,
+    },
+    physics: {
+      radius: Math.max(width, depth) / 2,
+      height,
+      weight: 1500,
+      isSolid: true,
+      points: createRectanglePoints(width, depth),
+    },
+    health: { maxHp: 1000, hp: 1000, destructible: true },
+  };
+}
+
+export function createBoatConfig(position?: Vec3, angle: Radians = 0 as Radians): EntityConfig {
+  const width = 1.4;
+  const depth = 3.5;
+  const height = 0.5;
+  return {
+    tag: { archetype: 'obstacle', subType: 'boat' },
+    meta: { name: 'Лодка', entityType: 'obstacle', destructible: true },
+    visualModel: { modelId: 'proc://prop/boat' },
+    transform: {
+      x: position?.x ?? 0,
+      y: position?.y ?? 0,
+      z: position?.z ?? 0,
+      rotation: { x: 0, y: Math.sin(angle * 0.5), z: 0, w: Math.cos(angle * 0.5) },
+      angle,
+    },
+    physics: {
+      radius: Math.max(width, depth) / 2,
+      height,
+      weight: 300,
+      isSolid: true,
+      points: createRectanglePoints(width, depth),
+    },
+    health: { maxHp: 500, hp: 500, destructible: true },
+  };
+}
+
+export function createWoodenBoxConfig(
+  position?: Vec3,
+  angle: Radians = 0 as Radians
+): EntityConfig {
+  const width = 1.0;
+  const depth = 1.0;
+  const height = 1.0;
+  return {
+    tag: { archetype: 'obstacle', subType: 'crate' },
+    meta: { name: 'Деревянная коробка', entityType: 'obstacle', destructible: true },
+    visualModel: { modelId: 'proc://prop/wooden_box' },
+    transform: {
+      x: position?.x ?? 0,
+      y: position?.y ?? 0,
+      z: position?.z ?? 0,
+      rotation: { x: 0, y: Math.sin(angle * 0.5), z: 0, w: Math.cos(angle * 0.5) },
+      angle,
+    },
+    physics: {
+      radius: Math.max(width, depth) / 2,
+      height,
+      weight: 50,
+      isSolid: true,
+      points: createRectanglePoints(width, depth),
+    },
+    health: { maxHp: 100, hp: 100, destructible: true },
+  };
+}
+
+export function createLargeBridgeConfig(
+  position?: Vec3,
+  angle: Radians = 0 as Radians
+): EntityConfig {
+  const width = 3.0;
+  const depth = 12.0;
+  const height = 1.0;
+  return {
+    tag: { archetype: 'obstacle', subType: 'building' },
+    meta: { name: 'Большой мост', entityType: 'obstacle', destructible: false },
+    visualModel: { modelId: 'proc://prop/large_bridge' },
+    transform: {
+      x: position?.x ?? 0,
+      y: position?.y ?? 0,
+      z: position?.z ?? 0,
+      rotation: { x: 0, y: Math.sin(angle * 0.5), z: 0, w: Math.cos(angle * 0.5) },
+      angle,
+    },
+    physics: {
+      radius: Math.max(width, depth) / 2,
+      height,
+      weight: 15000,
+      isSolid: true,
+      points: createRectanglePoints(width, depth),
+    },
+    health: { maxHp: 5000, hp: 5000, destructible: false },
+  };
+}
+
+export function createDoghouseConfig(position?: Vec3, angle: Radians = 0 as Radians): EntityConfig {
+  const width = 1.2;
+  const depth = 1.5;
+  const height = 1.0;
+  return {
+    tag: { archetype: 'obstacle', subType: 'building' },
+    meta: { name: 'Собачья будка', entityType: 'obstacle', destructible: true },
+    visualModel: { modelId: 'proc://prop/doghouse' },
+    transform: {
+      x: position?.x ?? 0,
+      y: position?.y ?? 0,
+      z: position?.z ?? 0,
+      rotation: { x: 0, y: Math.sin(angle * 0.5), z: 0, w: Math.cos(angle * 0.5) },
+      angle,
+    },
+    physics: {
+      radius: Math.max(width, depth) / 2,
+      height,
+      weight: 150,
+      isSolid: true,
+      points: createRectanglePoints(width, depth),
+    },
+    health: { maxHp: 300, hp: 300, destructible: true },
+  };
+}
+
+export function createInvisibleWallConfig(
+  position?: Vec3,
+  angle: Radians = 0 as Radians
+): EntityConfig {
+  const width = 4.0;
+  const depth = 0.5;
+  const height = 3.0;
+  return {
+    tag: { archetype: 'obstacle', subType: 'invisible_wall' },
+    meta: { name: 'Невидимая стена', entityType: 'obstacle', destructible: false },
+    visualModel: { modelId: 'proc://prop/invisible_wall' },
+    transform: {
+      x: position?.x ?? 0,
+      y: position?.y ?? 0,
+      z: position?.z ?? 0,
+      rotation: { x: 0, y: Math.sin(angle * 0.5), z: 0, w: Math.cos(angle * 0.5) },
+      angle,
+    },
+    physics: {
+      radius: Math.max(width, depth) / 2,
+      height,
+      weight: 100000,
+      isSolid: true,
+      points: createRectanglePoints(width, depth),
+      colliders: [
+        {
+          shape: 'cuboid',
+          halfExtents: { x: width / 2, y: height / 2, z: depth / 2 },
+          offset: { x: 0, y: height / 2, z: 0 },
+        },
+      ],
+    },
+    health: {
+      maxHp: 999999,
+      hp: 999999,
+      destructible: false,
+    },
+  };
+}
+
 export function createHouseConfig(position?: Vec3, angle: Radians = 0 as Radians): EntityConfig {
   const width = 5.0;
   const depth = 5.4;

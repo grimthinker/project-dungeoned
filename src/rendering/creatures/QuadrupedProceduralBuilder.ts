@@ -12,6 +12,14 @@ export class QuadrupedProceduralBuilder implements IProceduralCreatureBuilder {
   private static noseMat = new THREE.MeshStandardMaterial({ color: 0x1c1917, roughness: 0.9 });
   private static eyeMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5 });
 
+  // Материалы для худой гончей (доберман / овчарка)
+  private static houndFurMat = new THREE.MeshStandardMaterial({ color: 0x272422, roughness: 0.5 });
+  private static houndTanMat = new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.6 });
+  private static houndCollarMat = new THREE.MeshStandardMaterial({
+    color: 0x2563eb,
+    roughness: 0.4,
+  });
+
   public createRigTemplate(): THREE.Group {
     const root = new THREE.Group();
     root.name = 'DogRoot';
@@ -61,81 +69,127 @@ export class QuadrupedProceduralBuilder implements IProceduralCreatureBuilder {
   }
 
   public createPartMesh(partKey: string): THREE.Object3D | null {
-    const { furMat, chestFurMat, collarMat, noseMat, eyeMat } = QuadrupedProceduralBuilder;
+    const {
+      furMat,
+      chestFurMat,
+      collarMat,
+      noseMat,
+      eyeMat,
+      houndFurMat,
+      houndTanMat,
+      houndCollarMat,
+    } = QuadrupedProceduralBuilder;
+    const isHound = partKey.endsWith('_hound');
+
+    const fMat = isHound ? houndFurMat : furMat;
+    const cMat = isHound ? houndTanMat : chestFurMat;
+    const colMat = isHound ? houndCollarMat : collarMat;
 
     switch (partKey) {
-      case 'torso': {
+      case 'torso':
+      case 'torso_hound': {
         const torsoMesh = new THREE.Group();
         torsoMesh.name = 'TorsoMesh';
 
-        const mane = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.38, 0.32), chestFurMat);
+        const chestWidth = isHound ? 0.3 : 0.38;
+        const mane = new THREE.Mesh(new THREE.BoxGeometry(chestWidth, 0.36, 0.32), cMat);
         mane.position.set(0, 0.01, 0.12);
         mane.castShadow = true;
         torsoMesh.add(mane);
 
-        const collar = new THREE.Mesh(new THREE.BoxGeometry(0.385, 0.385, 0.05), collarMat);
+        const collar = new THREE.Mesh(
+          new THREE.BoxGeometry(chestWidth + 0.01, 0.365, 0.05),
+          colMat
+        );
         collar.position.set(0, 0.01, 0.27);
         collar.castShadow = true;
         torsoMesh.add(collar);
 
-        const hindBody = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.32, 0.38), furMat);
+        const hindWidth = isHound ? 0.24 : 0.32;
+        const hindBody = new THREE.Mesh(new THREE.BoxGeometry(hindWidth, 0.28, 0.38), fMat);
         hindBody.position.set(0, -0.01, -0.18);
         hindBody.castShadow = true;
         torsoMesh.add(hindBody);
 
         return torsoMesh;
       }
-      case 'head': {
+      case 'head':
+      case 'head_hound': {
         const headGroup = new THREE.Group();
         headGroup.name = 'Head';
 
-        const headBox = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.3, 0.3), furMat);
+        const headW = isHound ? 0.26 : 0.32;
+        const headBox = new THREE.Mesh(new THREE.BoxGeometry(headW, 0.28, 0.28), fMat);
         headBox.position.set(0, 0.06, 0.1);
         headBox.castShadow = true;
         headGroup.add(headBox);
 
-        const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.18), furMat);
+        const muzzle = new THREE.Mesh(
+          new THREE.BoxGeometry(0.14, 0.13, 0.2),
+          isHound ? houndTanMat : fMat
+        );
         muzzle.position.set(0, 0.0, 0.28);
         muzzle.castShadow = true;
         headGroup.add(muzzle);
 
         const nose = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 0.03), noseMat);
-        nose.position.set(0, 0.04, 0.375);
+        nose.position.set(0, 0.04, 0.385);
         nose.castShadow = true;
         headGroup.add(nose);
 
+        const eyeX = isHound ? 0.09 : 0.11;
         const leftEye = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.02), eyeMat);
-        leftEye.position.set(0.11, 0.08, 0.25);
+        leftEye.position.set(eyeX, 0.08, 0.24);
         headGroup.add(leftEye);
 
         const rightEye = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.02), eyeMat);
-        rightEye.position.set(-0.11, 0.08, 0.25);
+        rightEye.position.set(-eyeX, 0.08, 0.24);
         headGroup.add(rightEye);
 
-        const leftEar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.05), furMat);
-        leftEar.position.set(0.1, 0.24, 0.08);
+        // Уши: у обычной собаки маленькие (0.1м), у гончей высокие вертикальные торчащие уши (0.24м)
+        const earHeight = isHound ? 0.24 : 0.1;
+        const earPosY = isHound ? 0.31 : 0.24;
+        const earW = isHound ? 0.06 : 0.08;
+
+        const leftEar = new THREE.Mesh(new THREE.BoxGeometry(earW, earHeight, 0.04), fMat);
+        leftEar.position.set(0.1, earPosY, 0.08);
+        if (isHound) leftEar.rotation.z = -0.15;
         leftEar.castShadow = true;
         headGroup.add(leftEar);
 
-        const rightEar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.05), furMat);
-        rightEar.position.set(-0.1, 0.24, 0.08);
+        const rightEar = new THREE.Mesh(new THREE.BoxGeometry(earW, earHeight, 0.04), fMat);
+        rightEar.position.set(-0.1, earPosY, 0.08);
+        if (isHound) rightEar.rotation.z = 0.15;
         rightEar.castShadow = true;
         headGroup.add(rightEar);
 
         return headGroup;
       }
-      case 'tail': {
-        const tailMesh = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.32), furMat);
+      case 'tail':
+      case 'tail_hound': {
+        const tailThickness = isHound ? 0.06 : 0.08;
+        const tailMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(tailThickness, tailThickness, 0.34),
+          fMat
+        );
         tailMesh.name = 'Tail';
-        tailMesh.position.set(0, -0.02, -0.14);
+        tailMesh.position.set(0, -0.02, -0.15);
         tailMesh.castShadow = true;
         return tailMesh;
       }
       case 'front_leg_l':
+      case 'front_leg_l_hound':
       case 'front_leg_r':
+      case 'front_leg_r_hound':
       case 'rear_leg_l':
-      case 'rear_leg_r': {
-        const legMesh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.4, 0.12), furMat);
+      case 'rear_leg_l_hound':
+      case 'rear_leg_r':
+      case 'rear_leg_r_hound': {
+        const legThickness = isHound ? 0.09 : 0.12;
+        const legMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(legThickness, 0.4, legThickness),
+          isHound ? houndTanMat : fMat
+        );
         legMesh.position.set(0, -0.2, 0);
         legMesh.castShadow = true;
         return legMesh;

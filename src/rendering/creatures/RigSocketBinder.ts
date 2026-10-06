@@ -9,6 +9,8 @@ export interface SocketItemBinding {
 }
 
 export class RigSocketBinder {
+  private tempScale = new THREE.Vector3();
+
   /**
    * Синхронизирует прикрепление предметов из ячеек взаимодействия (оружие, мячи и т.д.)
    * к костям сокетов скелетного рига существа (LeftHandSocket, RightHandSocket, JawsSocket и др.)
@@ -48,8 +50,18 @@ export class RigSocketBinder {
         }
 
         // Прикрепляем актуальный предмет к кости с учетом точки хвата
-        if (itemObj && itemObj.parent !== socketBone) {
-          socketBone.add(itemObj);
+        if (itemObj) {
+          if (itemObj.parent !== socketBone) {
+            socketBone.add(itemObj);
+          }
+
+          // Компенсируем искажение предмета при изменении роста/масштаба самого существа
+          socketBone.getWorldScale(this.tempScale);
+          const sx = this.tempScale.x !== 0 ? 1 / this.tempScale.x : 1;
+          const sy = this.tempScale.y !== 0 ? 1 / this.tempScale.y : 1;
+          const sz = this.tempScale.z !== 0 ? 1 / this.tempScale.z : 1;
+          itemObj.scale.set(sx, sy, sz);
+
           const grip = itemObj.userData.gripTransform as GripTransform | undefined;
           if (grip) {
             itemObj.position.copy(grip.position);
@@ -94,6 +106,12 @@ export class RigSocketBinder {
         if (itemObj.parent !== torsoBone) {
           torsoBone.add(itemObj);
         }
+        // Компенсируем искажение предмета при изменении роста/масштаба самого существа
+        torsoBone.getWorldScale(this.tempScale);
+        const sx = this.tempScale.x !== 0 ? 1 / this.tempScale.x : 1;
+        const sy = this.tempScale.y !== 0 ? 1 / this.tempScale.y : 1;
+        const sz = this.tempScale.z !== 0 ? 1 / this.tempScale.z : 1;
+        itemObj.scale.set(sx, sy, sz);
 
         itemObj.position.set(0, 0, -0.22);
         itemObj.quaternion.setFromEuler(new THREE.Euler(0, Math.PI, 0));

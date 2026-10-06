@@ -22,4 +22,5 @@ export interface WaterConfig {
   flowSpeed?: number;
   density?: number;
   viscosity?: number;
+  foamIntensity?: number;
 }

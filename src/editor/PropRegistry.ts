@@ -13,6 +13,12 @@ import {
   createCratePropConfig,
   createLampPostConfig,
   createWellConfig,
+  createDockConfig,
+  createBoatConfig,
+  createWoodenBoxConfig,
+  createLargeBridgeConfig,
+  createDoghouseConfig,
+  createInvisibleWallConfig,
 } from '../ecs/archetypes/ObstacleArchetype';
 import { t } from '../locales';
 
@@ -70,6 +76,32 @@ export const getPropRegistry = (): PropRegistryItem[] => {
     { id: 'rock_5', name: t('palette.rock5'), icon: '🪨', create: () => createRockConfig(5, 1.0) },
 
     { id: 'well', name: 'Колодец', icon: '🪣', create: () => createWellConfig() },
+    { id: 'dock', name: t('palette.dock'), icon: '⚓', create: () => createDockConfig() },
+    { id: 'boat', name: t('palette.boat'), icon: '🛶', create: () => createBoatConfig() },
+    {
+      id: 'wooden_box',
+      name: t('palette.woodenBox'),
+      icon: '📦',
+      create: () => createWoodenBoxConfig(),
+    },
+    {
+      id: 'large_bridge',
+      name: t('palette.largeBridge'),
+      icon: '🌉',
+      create: () => createLargeBridgeConfig(),
+    },
+    {
+      id: 'doghouse',
+      name: t('palette.doghouse'),
+      icon: '🏠',
+      create: () => createDoghouseConfig(),
+    },
+    {
+      id: 'invisible_wall',
+      name: t('palette.invisibleWall'),
+      icon: '🧱',
+      create: () => createInvisibleWallConfig(),
+    },
     { id: 'house', name: t('palette.house'), icon: '🏠', create: () => createHouseConfig() },
     { id: 'bridge', name: t('palette.bridge'), icon: '🌉', create: () => createBridgeConfig() },
     { id: 'toilet', name: t('palette.toilet'), icon: '🚪', create: () => createToiletConfig() },

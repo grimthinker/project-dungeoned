@@ -47,6 +47,7 @@ export interface WaterData {
   flowSpeed: number;
   density: number;
   viscosity: number;
+  foamIntensity?: number;
 }
 
 /** 2D-координаты для экранных операций, рамки выделения и курсора в UI */

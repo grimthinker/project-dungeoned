@@ -63,6 +63,17 @@ const PROCEDURAL_PROP_SCALES: Record<
   'proc://prop/barrel': { baseRadius: 0.5, baseHeight: 1.1, baseWidth: 1.0, baseDepth: 1.0 },
   'proc://prop/crate': { baseRadius: 0.6, baseHeight: 0.6, baseWidth: 1.1, baseDepth: 0.85 },
   'proc://prop/bridge': { baseRadius: 3.0, baseHeight: 1.2, baseWidth: 2.4, baseDepth: 6.0 },
+  'proc://prop/dock': { baseRadius: 2.0, baseHeight: 1.5, baseWidth: 2.0, baseDepth: 4.0 },
+  'proc://prop/boat': { baseRadius: 1.75, baseHeight: 0.5, baseWidth: 1.4, baseDepth: 3.5 },
+  'proc://prop/wooden_box': { baseRadius: 0.7, baseHeight: 1.0, baseWidth: 1.0, baseDepth: 1.0 },
+  'proc://prop/large_bridge': { baseRadius: 6.0, baseHeight: 1.0, baseWidth: 3.0, baseDepth: 12.0 },
+  'proc://prop/doghouse': { baseRadius: 0.9, baseHeight: 1.0, baseWidth: 1.2, baseDepth: 1.5 },
+  'proc://prop/invisible_wall': {
+    baseRadius: 2.0,
+    baseHeight: 3.0,
+    baseWidth: 4.0,
+    baseDepth: 0.5,
+  },
   'proc://prop/lamp_post': { baseRadius: 0.4, baseHeight: 3.0, baseWidth: 0.8, baseDepth: 0.8 },
   'proc://prop/house': { baseRadius: 2.7, baseHeight: 5.5, baseWidth: 5.0, baseDepth: 5.4 },
   'proc://prop/fence': { baseRadius: 1.2, baseHeight: 1.15, baseWidth: 2.4, baseDepth: 0.25 },
@@ -668,6 +679,9 @@ export class ThreeSyncSystem {
                 if (waterComp.color && u.uColor) {
                   u.uColor.value.set(waterComp.color);
                 }
+                if (u.uFoamIntensity) {
+                  u.uFoamIntensity.value = waterComp.foamIntensity ?? 1.0;
+                }
                 if (u.uDeepColor) {
                   if (waterComp.deepColor) {
                     u.uDeepColor.value.set(waterComp.deepColor);
@@ -850,6 +864,14 @@ export class ThreeSyncSystem {
               ) as THREE.Mesh;
               if (mainMesh && mainMesh.material !== mat) mainMesh.material = mat;
             }
+          } else if (archetype === 'obstacle') {
+            const visual = world.getComponent(id, 'visualModel');
+            if (
+              tag?.subType === 'invisible_wall' ||
+              visual?.modelId === 'proc://prop/invisible_wall'
+            ) {
+              obj.visible = _gameMode !== GameMode.GAME;
+            }
           }
         }
       }
@@ -1021,6 +1043,7 @@ export class ThreeSyncSystem {
 
       const isObstacle = archetype === 'obstacle';
       if (isObstacle) {
+        if (tag?.subType === 'invisible_wall') continue;
         if (!entity.meta?.destructible) continue;
         if (gameMode === 'game' && (!health?.healthBarTimer || health.healthBarTimer <= 0)) {
           continue;

@@ -38,6 +38,18 @@ export class ProceduralPropManager {
       prop = this.buildPine();
     } else if (name === 'well') {
       prop = this.buildWell();
+    } else if (name === 'dock') {
+      prop = this.buildDock();
+    } else if (name === 'boat') {
+      prop = this.buildBoat();
+    } else if (name === 'wooden_box') {
+      prop = this.buildWoodenBox();
+    } else if (name === 'large_bridge') {
+      prop = this.buildLargeBridge();
+    } else if (name === 'doghouse') {
+      prop = this.buildDoghouse();
+    } else if (name === 'invisible_wall') {
+      prop = this.buildInvisibleWall();
     } else if (name === 'signpost') {
       prop = this.buildSignpost();
     } else if (name === 'signpost_single') {
@@ -501,6 +513,449 @@ export class ProceduralPropManager {
     bucketGroup.add(bucketHandle);
 
     group.add(bucketGroup);
+
+    return group;
+  }
+
+  /** Деревянный причал на 4 столбах */
+  private buildDock(): THREE.Group {
+    const group = new THREE.Group();
+    group.name = 'DockRoot';
+
+    const woodTex = this.createWoodPlankTexture(false);
+    const darkWoodTex = this.createWoodPlankTexture(true);
+
+    const deckMat = new THREE.MeshStandardMaterial({
+      map: woodTex,
+      color: 0xa67c52,
+      roughness: 0.9,
+      flatShading: true,
+    });
+    const postMat = new THREE.MeshStandardMaterial({
+      map: darkWoodTex,
+      color: 0x5c4033,
+      roughness: 0.9,
+      flatShading: true,
+    });
+    const waterLevelMat = new THREE.MeshStandardMaterial({
+      color: 0x2e352b,
+      roughness: 0.9,
+      flatShading: true,
+    });
+
+    const width = 2.0;
+    const length = 4.0;
+    const height = 1.5;
+    const postRadius = 0.15;
+
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(width, 0.1, length), deckMat);
+    deck.position.set(0, height, 0);
+    group.add(deck);
+
+    for (let i = 0; i < 8; i++) {
+      const z = -length / 2 + (i + 0.5) * (length / 8);
+      const gap = new THREE.Mesh(
+        new THREE.BoxGeometry(width + 0.02, 0.11, 0.02),
+        new THREE.MeshStandardMaterial({ color: 0x3e2723 })
+      );
+      gap.position.set(0, height, z);
+      group.add(gap);
+    }
+
+    const postPositions = [
+      { x: -width / 2 + 0.2, z: -length / 2 + 0.2 },
+      { x: width / 2 - 0.2, z: -length / 2 + 0.2 },
+      { x: -width / 2 + 0.2, z: length / 2 - 0.2 },
+      { x: width / 2 - 0.2, z: length / 2 - 0.2 },
+    ];
+
+    postPositions.forEach((pos) => {
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(postRadius, postRadius, height + 0.4, 8),
+        postMat
+      );
+      post.position.set(pos.x, height / 2 + 0.1, pos.z);
+      group.add(post);
+
+      const wetPost = new THREE.Mesh(
+        new THREE.CylinderGeometry(postRadius + 0.01, postRadius + 0.01, height * 0.4, 8),
+        waterLevelMat
+      );
+      wetPost.position.set(pos.x, height * 0.2, pos.z);
+      group.add(wetPost);
+    });
+
+    return group;
+  }
+
+  /** Деревянная лодка с 3 скошенными боковыми гранями по схеме */
+  private buildBoat(): THREE.Group {
+    const group = new THREE.Group();
+    group.name = 'BoatRoot';
+
+    const hullMat = new THREE.MeshStandardMaterial({
+      color: 0x8a5229,
+      roughness: 0.85,
+      side: THREE.DoubleSide,
+      flatShading: true,
+    });
+    const trimMat = new THREE.MeshStandardMaterial({
+      color: 0x5a3118,
+      roughness: 0.8,
+      flatShading: true,
+    });
+
+    // 4 станции вдоль продольной оси Z (3 секции бортов по схеме)
+    // 0: Корма, 1: Мидель (середина), 2: Плечо носа, 3: Острие носа
+    const stations = [
+      { z: -1.6, bW: 0.38, tW: 0.56, bY: 0.04, tY: 0.58 },
+      { z: -0.2, bW: 0.48, tW: 0.72, bY: 0.01, tY: 0.52 },
+      { z: 0.9, bW: 0.38, tW: 0.58, bY: 0.03, tY: 0.55 },
+      { z: 1.8, bW: 0.0, tW: 0.0, bY: 0.12, tY: 0.65 },
+    ];
+
+    const positions: number[] = [];
+    const indices: number[] = [];
+
+    // Добавляем вершины дна и бортов
+    // Для станций 0..2: 4 вершины (BottomLeft, BottomRight, TopLeft, TopRight)
+    // Для станции 3 (нос): 2 вершины (BottomTip, TopTip)
+    const addQuad = (p0: number[], p1: number[], p2: number[], p3: number[]) => {
+      const idx = positions.length / 3;
+      positions.push(...p0, ...p1, ...p2, ...p3);
+      indices.push(idx, idx + 1, idx + 2, idx, idx + 2, idx + 3);
+    };
+
+    const addTri = (p0: number[], p1: number[], p2: number[]) => {
+      const idx = positions.length / 3;
+      positions.push(...p0, ...p1, ...p2);
+      indices.push(idx, idx + 1, idx + 2);
+    };
+
+    // 1. Дно лодки
+    for (let i = 0; i < 2; i++) {
+      const s0 = stations[i];
+      const s1 = stations[i + 1];
+      addQuad(
+        [-s0.bW, s0.bY, s0.z],
+        [s0.bW, s0.bY, s0.z],
+        [s1.bW, s1.bY, s1.z],
+        [-s1.bW, s1.bY, s1.z]
+      );
+    }
+    // Носовой треугольник дна
+    const s2 = stations[2];
+    const s3 = stations[3];
+    addTri([-s2.bW, s2.bY, s2.z], [s2.bW, s2.bY, s2.z], [s3.bW, s3.bY, s3.z]);
+
+    // 2. Кормовой транец (задняя стенка)
+    const st0 = stations[0];
+    addQuad(
+      [-st0.tW, st0.tY, st0.z],
+      [st0.tW, st0.tY, st0.z],
+      [st0.bW, st0.bY, st0.z],
+      [-st0.bW, st0.bY, st0.z]
+    );
+
+    // 3. Левый борт (3 грани)
+    for (let i = 0; i < 2; i++) {
+      const cur = stations[i];
+      const nxt = stations[i + 1];
+      addQuad(
+        [-cur.bW, cur.bY, cur.z],
+        [-nxt.bW, nxt.bY, nxt.z],
+        [-nxt.tW, nxt.tY, nxt.z],
+        [-cur.tW, cur.tY, cur.z]
+      );
+    }
+    addQuad(
+      [-stations[2].bW, stations[2].bY, stations[2].z],
+      [stations[3].bW, stations[3].bY, stations[3].z],
+      [stations[3].tW, stations[3].tY, stations[3].z],
+      [-stations[2].tW, stations[2].tY, stations[2].z]
+    );
+
+    // 4. Правый борт (3 грани)
+    for (let i = 0; i < 2; i++) {
+      const cur = stations[i];
+      const nxt = stations[i + 1];
+      addQuad(
+        [cur.bW, cur.bY, cur.z],
+        [cur.tW, cur.tY, cur.z],
+        [nxt.tW, nxt.tY, nxt.z],
+        [nxt.bW, nxt.bY, nxt.z]
+      );
+    }
+    addQuad(
+      [stations[2].bW, stations[2].bY, stations[2].z],
+      [-stations[2].tW, stations[2].tY, stations[2].z],
+      [stations[3].tW, stations[3].tY, stations[3].z],
+      [stations[3].bW, stations[3].bY, stations[3].z]
+    );
+
+    const hullGeo = new THREE.BufferGeometry();
+    hullGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    hullGeo.setIndex(indices);
+    hullGeo.computeVertexNormals();
+
+    const hullMesh = new THREE.Mesh(hullGeo, hullMat);
+    group.add(hullMesh);
+
+    // 5. Окантовочный планширь (Rim) по верхнему периметру
+    const createRailSegment = (pA: number[], pB: number[]) => {
+      const vA = new THREE.Vector3(...pA);
+      const vB = new THREE.Vector3(...pB);
+      const len = vA.distanceTo(vB);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, len), trimMat);
+      rail.position.lerpVectors(vA, vB, 0.5);
+      rail.lookAt(vB);
+      group.add(rail);
+    };
+
+    // Планширь по левому и правому борту
+    for (let i = 0; i < 3; i++) {
+      createRailSegment(
+        [-stations[i].tW, stations[i].tY, stations[i].z],
+        [-stations[i + 1].tW, stations[i + 1].tY, stations[i + 1].z]
+      );
+      createRailSegment(
+        [stations[i].tW, stations[i].tY, stations[i].z],
+        [stations[i + 1].tW, stations[i + 1].tY, stations[i + 1].z]
+      );
+    }
+    createRailSegment(
+      [-stations[0].tW, stations[0].tY, stations[0].z],
+      [stations[0].tW, stations[0].tY, stations[0].z]
+    );
+
+    // 6. Банки (деревянные сиденья)
+    const seat1 = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.04, 0.32), trimMat);
+    seat1.position.set(0, 0.35, -0.6);
+    group.add(seat1);
+
+    const seat2 = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.04, 0.32), trimMat);
+    seat2.position.set(0, 0.36, 0.35);
+    group.add(seat2);
+
+    return group;
+  }
+
+  /** Закрытый деревянный бокс (Коробка) */
+  private buildWoodenBox(): THREE.Group {
+    const group = new THREE.Group();
+    group.name = 'WoodenBoxRoot';
+
+    const woodMat = new THREE.MeshStandardMaterial({
+      color: 0xc19a6b,
+      roughness: 0.9,
+      flatShading: true,
+    });
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0x8b5a2b,
+      roughness: 0.8,
+      flatShading: true,
+    });
+
+    const s = 1.0;
+    const t = 0.1;
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(s - t, s - t, s - t), woodMat);
+    body.position.set(0, s / 2, 0);
+    group.add(body);
+
+    const edgeGeo = new THREE.BoxGeometry(s, t, t);
+
+    for (const y of [t / 2, s - t / 2]) {
+      for (const z of [-s / 2 + t / 2, s / 2 - t / 2]) {
+        const edgeX = new THREE.Mesh(edgeGeo, frameMat);
+        edgeX.position.set(0, y, z);
+        group.add(edgeX);
+      }
+      for (const x of [-s / 2 + t / 2, s / 2 - t / 2]) {
+        const edgeZ = new THREE.Mesh(edgeGeo, frameMat);
+        edgeZ.rotation.y = Math.PI / 2;
+        edgeZ.position.set(x, y, 0);
+        group.add(edgeZ);
+      }
+    }
+
+    const vertGeo = new THREE.BoxGeometry(t, s, t);
+    for (const x of [-s / 2 + t / 2, s / 2 - t / 2]) {
+      for (const z of [-s / 2 + t / 2, s / 2 - t / 2]) {
+        const edgeY = new THREE.Mesh(vertGeo, frameMat);
+        edgeY.position.set(x, s / 2, z);
+        group.add(edgeY);
+      }
+    }
+
+    const diagGeo = new THREE.BoxGeometry(s * 1.2, t, t * 0.5);
+    const faces = [
+      { px: 0, pz: s / 2, ry: 0 },
+      { px: 0, pz: -s / 2, ry: 0 },
+      { px: s / 2, pz: 0, ry: Math.PI / 2 },
+      { px: -s / 2, pz: 0, ry: Math.PI / 2 },
+    ];
+    for (const f of faces) {
+      const diag = new THREE.Mesh(diagGeo, frameMat);
+      diag.position.set(f.px, s / 2, f.pz);
+      diag.rotation.y = f.ry;
+      diag.rotation.z = Math.PI / 4;
+      group.add(diag);
+    }
+
+    return group;
+  }
+
+  /** Большой деревянный мост с каменными опорами */
+  private buildLargeBridge(): THREE.Group {
+    const group = new THREE.Group();
+    group.name = 'LargeBridgeRoot';
+
+    const woodMat = new THREE.MeshStandardMaterial({
+      color: 0xa67c52,
+      roughness: 0.9,
+      flatShading: true,
+    });
+    const darkWoodMat = new THREE.MeshStandardMaterial({
+      color: 0x5c4033,
+      roughness: 0.9,
+      flatShading: true,
+    });
+    const stoneMat = new THREE.MeshStandardMaterial({
+      color: 0x7f8c8d,
+      roughness: 0.8,
+      flatShading: true,
+    });
+
+    const length = 12.0;
+    const width = 3.0;
+    const height = 1.0;
+    const archOffset = 0.5;
+
+    const plankGeo = new THREE.BoxGeometry(width - 0.2, 0.1, 0.3);
+    for (let i = 0; i < 35; i++) {
+      const t = i / 34;
+      const z = -length / 2 + t * length;
+      const y = Math.sin(t * Math.PI) * archOffset + height;
+      const plank = new THREE.Mesh(plankGeo, woodMat);
+      plank.position.set(0, y, z);
+
+      const angle = -Math.cos(t * Math.PI) * (archOffset / (length / 2));
+      plank.rotation.x = angle;
+      group.add(plank);
+    }
+
+    const beamGeo = new THREE.BoxGeometry(0.2, 0.3, length);
+    [-width / 2 + 0.3, width / 2 - 0.3].forEach((x) => {
+      const beam = new THREE.Mesh(beamGeo, darkWoodMat);
+      beam.position.set(x, height + archOffset / 2 - 0.1, 0);
+      group.add(beam);
+    });
+
+    const postGeo = new THREE.BoxGeometry(0.2, 1.2, 0.2);
+    const railGeo = new THREE.BoxGeometry(0.1, 0.1, length);
+    [-width / 2 + 0.1, width / 2 - 0.1].forEach((x) => {
+      const railTop = new THREE.Mesh(railGeo, woodMat);
+      railTop.position.set(x, height + archOffset / 2 + 1.0, 0);
+      group.add(railTop);
+      const railMid = new THREE.Mesh(railGeo, woodMat);
+      railMid.position.set(x, height + archOffset / 2 + 0.5, 0);
+      group.add(railMid);
+
+      for (let i = 0; i <= 6; i++) {
+        const t = i / 6;
+        const z = -length / 2 + t * length;
+        const y = Math.sin(t * Math.PI) * archOffset + height;
+        const post = new THREE.Mesh(postGeo, darkWoodMat);
+        post.position.set(x, y + 0.5, z);
+        group.add(post);
+      }
+    });
+
+    const supportGeo = new THREE.BoxGeometry(width + 0.5, height + 1.0, 1.0);
+    [-length / 2 + 1.0, length / 2 - 1.0].forEach((z) => {
+      const support = new THREE.Mesh(supportGeo, stoneMat);
+      support.position.set(0, (height + 1.0) / 2 - 1.0, z);
+      group.add(support);
+    });
+
+    return group;
+  }
+
+  /** Собачья будка */
+  private buildDoghouse(): THREE.Group {
+    const group = new THREE.Group();
+    group.name = 'DoghouseRoot';
+
+    const woodMat = new THREE.MeshStandardMaterial({
+      color: 0xd4a373,
+      roughness: 0.9,
+      flatShading: true,
+    });
+    const roofMat = new THREE.MeshStandardMaterial({
+      color: 0xd90429,
+      roughness: 0.8,
+      flatShading: true,
+    });
+    const darkMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 1.0 });
+
+    const w = 1.2;
+    const l = 1.5;
+    const h = 1.0;
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), woodMat);
+    body.position.set(0, h / 2, 0);
+    group.add(body);
+
+    const gableShape = new THREE.Shape();
+    gableShape.moveTo(-w / 2, 0);
+    gableShape.lineTo(w / 2, 0);
+    gableShape.lineTo(0, h * 0.6);
+    gableShape.closePath();
+    const gableGeo = new THREE.ExtrudeGeometry(gableShape, { depth: l, bevelEnabled: false });
+    gableGeo.translate(0, 0, -l / 2);
+    const gables = new THREE.Mesh(gableGeo, woodMat);
+    gables.position.set(0, h, 0);
+    group.add(gables);
+
+    const roofW = w * 0.7;
+    const roofL = l * 1.1;
+    const roofThickness = 0.05;
+    const angle = Math.atan2(h * 0.6, w / 2);
+
+    const roofLMesh = new THREE.Mesh(new THREE.BoxGeometry(roofW, roofThickness, roofL), roofMat);
+    roofLMesh.position.set(-w / 4 - 0.05, h + h * 0.3, 0);
+    roofLMesh.rotation.z = angle;
+    group.add(roofLMesh);
+
+    const roofRMesh = new THREE.Mesh(new THREE.BoxGeometry(roofW, roofThickness, roofL), roofMat);
+    roofRMesh.position.set(w / 4 + 0.05, h + h * 0.3, 0);
+    roofRMesh.rotation.z = -angle;
+    group.add(roofRMesh);
+
+    const holeShape = new THREE.Shape();
+    holeShape.absarc(0, 0, 0.35, 0, Math.PI, false);
+    holeShape.lineTo(-0.35, -0.4);
+    holeShape.lineTo(0.35, -0.4);
+    holeShape.closePath();
+    const holeGeo = new THREE.ExtrudeGeometry(holeShape, { depth: 0.1, bevelEnabled: false });
+    const hole = new THREE.Mesh(holeGeo, darkMat);
+    hole.position.set(0, 0.4, l / 2 + 0.01);
+    group.add(hole);
+
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0xfaedcd, roughness: 0.9 });
+    const frameGeo = new THREE.TorusGeometry(0.38, 0.04, 8, 16, Math.PI);
+    const frame = new THREE.Mesh(frameGeo, frameMat);
+    frame.position.set(0, 0.4, l / 2 + 0.06);
+    group.add(frame);
+
+    const frameLegL = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.4), frameMat);
+    frameLegL.position.set(-0.38, 0.2, l / 2 + 0.06);
+    group.add(frameLegL);
+
+    const frameLegR = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.4), frameMat);
+    frameLegR.position.set(0.38, 0.2, l / 2 + 0.06);
+    group.add(frameLegR);
 
     return group;
   }
@@ -1353,6 +1808,42 @@ export class ProceduralPropManager {
     gripPoint.position.set(0, 0.32, -0.02);
     gripPoint.rotation.set(-Math.PI / 2, 0, 0);
     group.add(gripPoint);
+
+    return group;
+  }
+
+  /** Невидимая стена с шахматной dev-текстурой для редактора */
+  private buildInvisibleWall(): THREE.Group {
+    const group = new THREE.Group();
+    group.name = 'InvisibleWallRoot';
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+
+    // Шахматный оранжево-темносерый узор
+    ctx.fillStyle = '#e67e22';
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.fillStyle = '#2c3e50';
+    ctx.fillRect(0, 0, 64, 64);
+    ctx.fillRect(64, 64, 64, 64);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(4, 3);
+
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex,
+      transparent: true,
+      opacity: 0.6,
+      roughness: 0.8,
+    });
+
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(4.0, 3.0, 0.5), mat);
+    mesh.position.set(0, 1.5, 0);
+    group.add(mesh);
 
     return group;
   }
