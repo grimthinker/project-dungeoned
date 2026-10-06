@@ -26,11 +26,10 @@ jobs:
 
       # 4. Выгружаем собранную папку dist на itch.io
       - name: Deploy to Itch.io
-        uses: Ayowel/butler-to-itch@v2
+        uses: [yeslayla/butler-publish-itchio-action](https://github.com/marketplace/actions/butler-push)@v1.2.0
         with:
-          butler_key: ${{ secrets.BUTLER_API_KEY }}
-          itch_user: grimthinker
-          itch_game: dungeoned
-          files: dist
-          auto_channel: false
-          channel: html5
+          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
+          CHANNEL: html5
+          ITCH_GAME: dungeoned
+          ITCH_USER: grimthinker
+          PACKAGE: dist
