@@ -14,7 +14,8 @@ import { GameMenuModal } from './gameHud/GameMenuModal';
 import { BlockTargetPanel } from './gameHud/BlockTargetPanel';
 import { EntityInfoWindow } from './gameHud/EntityInfoWindow';
 import { BlockDialogue } from './gameHud/BlockDialogue';
-import { ActiveDialogueDTO } from './gameHud/hudPorts';
+import { BlockReading } from './gameHud/BlockReading';
+import { ActiveDialogueDTO, ActiveReadingDTO } from './gameHud/hudPorts';
 import { EventBus } from '../core/EventBus';
 import { GAMEPLAY_CONFIG } from '../config/gameplayConfig';
 
@@ -50,6 +51,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const [activeDialogue, setActiveDialogue] = useState<ActiveDialogueDTO | null>(() =>
     hudProvider ? hudProvider.getActiveDialogue() : null
   );
+  const [activeReading, setActiveReading] = useState<ActiveReadingDTO | null>(() =>
+    hudProvider ? hudProvider.getActiveReading() : null
+  );
 
   const [infoWindows, setInfoWindows] = useState<InfoWindowState[]>([]);
   const maxZIndexRef = useRef<number>(100);
@@ -61,9 +65,17 @@ export const GameHUD: React.FC<GameHUDProps> = ({
     const unsubClosed = EventBus.on('dialogue:closed', () => {
       setActiveDialogue(null);
     });
+    const unsubReadingState = EventBus.on('reading:state-changed', (dto) => {
+      setActiveReading(dto);
+    });
+    const unsubReadingClosed = EventBus.on('reading:closed', () => {
+      setActiveReading(null);
+    });
     return () => {
       unsubState();
       unsubClosed();
+      unsubReadingState();
+      unsubReadingClosed();
     };
   }, []);
 
@@ -148,6 +160,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       if (e.key === 'Escape' || e.code === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
+        if (activeReading) {
+          hudProvider?.closeReading();
+          return;
+        }
+        if (activeDialogue) {
+          hudProvider?.closeDialogue();
+          return;
+        }
         if (isGameMenuOpen) {
           closeGameMenu();
         } else {
@@ -223,6 +243,16 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           hudProvider={hudProvider}
           activeDialogue={activeDialogue}
           onClose={() => hudProvider.closeDialogue()}
+        />
+      )}
+
+      {/* Окно чтения информационных объектов (книги, дорожные знаки) */}
+      {activeReading && (
+        <BlockReading
+          app={app}
+          hudProvider={hudProvider}
+          activeReading={activeReading}
+          onClose={() => hudProvider.closeReading()}
         />
       )}
 

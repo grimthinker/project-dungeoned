@@ -20,7 +20,7 @@ export const BlockDialogue: React.FC<BlockDialogueProps> = ({
   const defaultX =
     typeof window !== 'undefined' ? Math.max(10, (window.innerWidth - width) / 2) : 200;
   const defaultY =
-    typeof window !== 'undefined' ? Math.max(10, window.innerHeight - height - 85) : 350;
+    typeof window !== 'undefined' ? Math.max(10, (window.innerHeight - height) / 2) : 120;
 
   // Typewriter effect state
   const [displayedLength, setDisplayedLength] = useState<number>(0);
@@ -73,8 +73,9 @@ export const BlockDialogue: React.FC<BlockDialogueProps> = ({
       initialWidth={width}
       initialHeight={height}
       minWidth={width}
-      minHeight={height}
+      minHeight={340}
       resizable={false}
+      resizableBottom={true}
       storageKey="hud_window_dialogue"
       zIndex={120}
     >
@@ -158,15 +159,15 @@ export const BlockDialogue: React.FC<BlockDialogueProps> = ({
           <div ref={historyBottomRef} />
         </div>
 
-        {/* Нижняя область: Прокручиваемый список вариантов ответов */}
+        {/* Нижняя область: Список вариантов ответов сохраняет фиксированный размер (до 4 кнопок) */}
         <div
           style={{
-            maxHeight: '120px',
-            minHeight: '75px',
+            flexShrink: 0,
+            maxHeight: '190px',
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
-            gap: '4px',
+            gap: '6px',
             paddingRight: '2px',
           }}
         >
@@ -182,8 +183,8 @@ export const BlockDialogue: React.FC<BlockDialogueProps> = ({
                     width: '100%',
                     textAlign: 'left',
                     justifyContent: 'flex-start',
-                    padding: '6px 10px',
-                    fontSize: '13px',
+                    padding: '10px 14px',
+                    fontSize: '15px',
                     whiteSpace: 'normal',
                     height: 'auto',
                     color: isExit ? '#8b0000' : '#080808',
@@ -193,7 +194,7 @@ export const BlockDialogue: React.FC<BlockDialogueProps> = ({
                     hudProvider.chooseDialogueOption(choice.id);
                   }}
                 >
-                  <span style={{ color: isExit ? '#8b0000' : '#2980b9', marginRight: '6px' }}>
+                  <span style={{ color: isExit ? '#8b0000' : '#2980b9', marginRight: '8px' }}>
                     {idx + 1}.
                   </span>
                   <span>{choice.text}</span>
@@ -208,6 +209,8 @@ export const BlockDialogue: React.FC<BlockDialogueProps> = ({
                 width: '100%',
                 justifyContent: 'center',
                 color: '#8b0000',
+                padding: '10px 14px',
+                fontSize: '15px',
               }}
               onClick={() => hudProvider.closeDialogue()}
             >

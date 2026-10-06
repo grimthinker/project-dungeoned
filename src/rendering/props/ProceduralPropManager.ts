@@ -24,6 +24,7 @@ export class ProceduralPropManager {
     }
 
     let prop: THREE.Group | null = null;
+    console.log(name);
     if (name === 'sword') {
       prop = this.buildSword();
     } else if (name === 'tree') {
@@ -60,6 +61,8 @@ export class ProceduralPropManager {
       prop = this.buildLampPost();
     } else if (name === 'ball') {
       prop = this.buildBall();
+    } else if (name === 'backpack') {
+      prop = this.buildBackpack();
     } else if (name === 'house') {
       prop = this.buildHouse();
     } else if (name === 'fence') {
@@ -1241,6 +1244,116 @@ export class ProceduralPropManager {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     group.add(mesh);
+
+    return group;
+  }
+
+  /** Красный low-poly рюкзак со скошенными гранями, карманом и нашивкой по референсу */
+  private buildBackpack(): THREE.Group {
+    const group = new THREE.Group();
+    group.name = 'BackpackRoot';
+
+    const redFabricMat = new THREE.MeshStandardMaterial({
+      color: 0xcc1f1f,
+      roughness: 0.85,
+      flatShading: true,
+    });
+    const darkZipMat = new THREE.MeshStandardMaterial({
+      color: 0x222222,
+      roughness: 0.7,
+      flatShading: true,
+    });
+    const patchMat = new THREE.MeshStandardMaterial({
+      color: 0x935c34,
+      roughness: 0.9,
+      flatShading: true,
+    });
+    const handleMat = new THREE.MeshStandardMaterial({
+      color: 0x1f2937,
+      roughness: 0.8,
+      flatShading: true,
+    });
+
+    // 1. Основной корпус со скошенными верхними и боковыми гранями
+    const bodyShape = new THREE.Shape();
+    bodyShape.moveTo(-0.2, -0.26);
+    bodyShape.lineTo(0.2, -0.26);
+    bodyShape.lineTo(0.24, 0.12);
+    bodyShape.lineTo(0.13, 0.26);
+    bodyShape.lineTo(-0.13, 0.26);
+    bodyShape.lineTo(-0.24, 0.12);
+    bodyShape.closePath();
+
+    const bodyGeo = new THREE.ExtrudeGeometry(bodyShape, {
+      depth: 0.22,
+      bevelEnabled: true,
+      bevelSegments: 1,
+      bevelSize: 0.03,
+      bevelThickness: 0.03,
+    });
+    bodyGeo.center();
+    const mainBody = new THREE.Mesh(bodyGeo, redFabricMat);
+    group.add(mainBody);
+
+    // Центральная полоса молнии основного отсека
+    const mainZip = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.44, 0.24), darkZipMat);
+    mainZip.position.set(-0.16, 0.02, 0);
+    group.add(mainZip);
+
+    // 2. Передний выпуклый карман
+    const pocketShape = new THREE.Shape();
+    pocketShape.moveTo(-0.16, -0.12);
+    pocketShape.lineTo(0.16, -0.12);
+    pocketShape.lineTo(0.17, 0.06);
+    pocketShape.lineTo(0.12, 0.12);
+    pocketShape.lineTo(-0.12, 0.12);
+    pocketShape.lineTo(-0.17, 0.06);
+    pocketShape.closePath();
+
+    const pocketGeo = new THREE.ExtrudeGeometry(pocketShape, {
+      depth: 0.1,
+      bevelEnabled: true,
+      bevelSegments: 1,
+      bevelSize: 0.015,
+      bevelThickness: 0.015,
+    });
+    pocketGeo.center();
+    const pocket = new THREE.Mesh(pocketGeo, redFabricMat);
+    pocket.position.set(0, -0.1, 0.155);
+    group.add(pocket);
+
+    // Горизонтальная молния переднего кармана
+    const pocketZip = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.02, 0.025), darkZipMat);
+    pocketZip.position.set(0, -0.06, 0.205);
+    group.add(pocketZip);
+
+    // Бегунок молнии кармана
+    const puller = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.04, 0.02), handleMat);
+    puller.position.set(-0.02, -0.075, 0.218);
+    group.add(puller);
+
+    // 3. Коричневый патч/нашивка сверху
+    const patch = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.09, 0.015), patchMat);
+    patch.position.set(0, 0.12, 0.135);
+    group.add(patch);
+
+    // 4. Верхняя дугообразная ручка для переноски
+    const handleCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(-0.06, 0.24, -0.02),
+      new THREE.Vector3(-0.05, 0.36, -0.02),
+      new THREE.Vector3(0.05, 0.36, -0.02),
+      new THREE.Vector3(0.06, 0.24, -0.02),
+    ]);
+    const handleGeo = new THREE.TubeGeometry(handleCurve, 6, 0.018, 4, false);
+    const handle = new THREE.Mesh(handleGeo, handleMat);
+    group.add(handle);
+
+    // 5. Вспомогательная нода для хвата в руку (GripPoint) при сбросе/удержании
+    const gripPoint = new THREE.Object3D();
+    gripPoint.name = 'GripPoint';
+    gripPoint.position.set(0, 0.32, -0.02);
+    gripPoint.rotation.set(-Math.PI / 2, 0, 0);
+    group.add(gripPoint);
 
     return group;
   }

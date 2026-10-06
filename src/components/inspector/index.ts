@@ -21,3 +21,5 @@ export * from './EnvironmentInspector';
 export * from './WaterInspector';
 export * from './ZoneShapeInspector';
 export * from './GameplayZoneInspector';
+export * from './DialogueInspector';
+export * from './ReadableInspector';

@@ -28,8 +28,14 @@ import {
   BTActionMasterLookAtDog,
   BTActionFollowPathSmooth,
   BTConditionHasFollowTarget,
+  BTConditionInDialogue,
+  BTActionDialogueLookAtPartner,
 } from './actions';
 import { BTSelector, BTReactiveSelector, BTSequence } from './composites';
+
+export function DialogueSubtree(): BTNode {
+  return new BTSequence([new BTConditionInDialogue(), new BTActionDialogueLookAtPartner()]);
+}
 import { BTNode, BTService } from './core';
 import {
   BTServiceFindNearestTarget,
@@ -160,87 +166,95 @@ export function FollowerTree(): BTNode {
 
 export function DogFetchTree(): BTNode {
   return new BTServiceSyncStats(
-    new BTServiceFetchWatcher(
-      new BTReactiveSelector([
-        // ВЕТКА 1: Доставка палки хозяину (бег трусцой издалека -> шаг рядом с хозяином, без спринта)
-        new BTSequence([
-          new BTConditionStringState({
-            stateKey: 'fetchState',
-            expectedState: 'returning_to_master',
-          }),
-          new BTActionSetTarget({ sourceKey: 'masterEntityId' }),
-          new BTServicePathUpdater(
-            new BTSequence([
-              new BTActionFollow({
-                stopDist: 2.2,
-                walkDistance: 5.0,
-                sprintMinDistance: undefined,
-                hysteresis: 1.0,
-              }),
-              new BTConditionDistance({ maxDistance: 2.8 }),
-              new BTActionRotateToPos(),
-              new BTActionDrop(),
-            ])
-          ),
-        ]),
+    new BTServiceBodyTurnOnLookLimit(
+      new BTServiceFetchWatcher(
+        new BTReactiveSelector([
+          // ВЕТКА ДИАЛОГА: Бот останавливается и смотрит на игрока
+          DialogueSubtree(),
 
-        // ВЕТКА 2: Доставка палки в центр игровой зоны (хозяин потерян, палка в зубах)
-        new BTSequence([
-          new BTConditionStringState({
-            stateKey: 'fetchState',
-            expectedState: 'delivering_to_zone',
-          }),
+          // ВЕТКА 1: Доставка палки хозяину (бег трусцой издалека -> шаг рядом с хозяином, без спринта)
           new BTSequence([
-            new BTActionMoveToPos({ posKey: 'playZoneCenter', stopDist: 4.0, sprint: false }),
-            new BTActionDrop(),
-          ]),
-        ]),
-
-        // ВЕТКА 3: Погоня за брошенной палкой (спринт с селектором дистанции)
-        new BTSequence([
-          new BTConditionStringState({ stateKey: 'fetchState', expectedState: 'chasing_item' }),
-          new BTActionSetTarget({ sourceKey: 'fetchTargetId' }),
-          new BTServicePathUpdater(
-            new BTReactiveSelector([
+            new BTConditionStringState({
+              stateKey: 'fetchState',
+              expectedState: 'returning_to_master',
+            }),
+            new BTActionSetTarget({ sourceKey: 'masterEntityId' }),
+            new BTServicePathUpdater(
               new BTSequence([
-                new BTConditionDistance({ maxDistance: 1.0 }),
-                new BTActionPickup({ targetKey: 'targetId' }),
-              ]),
-              new BTActionFollow({ stopDist: 0.6, sprintMinDistance: 0 }),
-            ])
-          ),
-          new BTCommandForgetTarget(),
-        ]),
+                new BTActionFollow({
+                  stopDist: 2.2,
+                  walkDistance: 5.0,
+                  sprintMinDistance: undefined,
+                  hysteresis: 1.0,
+                }),
+                new BTConditionDistance({ maxDistance: 3.8 }),
+                new BTActionRotateToPos(),
+                new BTActionDrop(),
+              ])
+            ),
+          ]),
 
-        // ВЕТКА 4: Следование за хозяином без палки (шаг рядом с хозяином)
-        new BTSequence([
-          new BTConditionStringState({ stateKey: 'fetchState', expectedState: 'following_master' }),
-          new BTActionSetTarget({ sourceKey: 'masterEntityId' }),
-          new BTServicePathUpdater(
-            new BTSelector([
-              new BTSequence([new BTConditionEngaged(), new BTActionRotateToPos()]),
-              new BTActionFollow({
-                stopDist: 2.5,
-                walkDistance: 5.5,
-                sprintMinDistance: 12.0,
-                hysteresis: 1.0,
-              }),
-            ])
-          ),
-        ]),
+          // ВЕТКА 2: Доставка палки в центр игровой зоны (хозяин потерян, палка в зубах)
+          new BTSequence([
+            new BTConditionStringState({
+              stateKey: 'fetchState',
+              expectedState: 'delivering_to_zone',
+            }),
+            new BTSequence([
+              new BTActionMoveToPos({ posKey: 'playZoneCenter', stopDist: 4.0, sprint: false }),
+              new BTActionDrop(),
+            ]),
+          ]),
 
-        // ВЕТКА 5: Возврат без палки в зону игры (хозяин потерян, рассредоточение вокруг центра)
-        new BTSequence([
-          new BTConditionStringState({
-            stateKey: 'fetchState',
-            expectedState: 'returning_to_zone',
-          }),
-          new BTActionMoveToPos({ posKey: 'dogZoneWaitPos', stopDist: 1.0, sprint: false }),
-        ]),
+          // ВЕТКА 3: Погоня за брошенной палкой (спринт с селектором дистанции)
+          new BTSequence([
+            new BTConditionStringState({ stateKey: 'fetchState', expectedState: 'chasing_item' }),
+            new BTActionSetTarget({ sourceKey: 'fetchTargetId' }),
+            new BTServicePathUpdater(
+              new BTReactiveSelector([
+                new BTSequence([
+                  new BTConditionDistance({ maxDistance: 1.0 }),
+                  new BTActionPickup({ targetKey: 'targetId' }),
+                ]),
+                new BTActionFollow({ stopDist: 0.6, sprintMinDistance: 0 }),
+              ])
+            ),
+            new BTCommandForgetTarget(),
+          ]),
 
-        new BTWait({ duration: 0.5 }),
-      ]),
-      { interval: 0.1 }
+          // ВЕТКА 4: Следование за хозяином без палки (шаг рядом с хозяином)
+          new BTSequence([
+            new BTConditionStringState({
+              stateKey: 'fetchState',
+              expectedState: 'following_master',
+            }),
+            new BTActionSetTarget({ sourceKey: 'masterEntityId' }),
+            new BTServicePathUpdater(
+              new BTSelector([
+                new BTSequence([new BTConditionEngaged(), new BTActionRotateToPos()]),
+                new BTActionFollow({
+                  stopDist: 2.5,
+                  walkDistance: 5.5,
+                  sprintMinDistance: 12.0,
+                  hysteresis: 1.0,
+                }),
+              ])
+            ),
+          ]),
+
+          // ВЕТКА 5: Возврат без палки в зону игры (хозяин потерян, рассредоточение вокруг центра)
+          new BTSequence([
+            new BTConditionStringState({
+              stateKey: 'fetchState',
+              expectedState: 'returning_to_zone',
+            }),
+            new BTActionMoveToPos({ posKey: 'dogZoneWaitPos', stopDist: 1.0, sprint: false }),
+          ]),
+
+          new BTWait({ duration: 0.5 }),
+        ]),
+        { interval: 0.1 }
+      )
     ),
     { interval: 0.5 }
   );
@@ -252,6 +266,9 @@ export function MasterFetchTree(): BTNode {
       new BTServiceBodyTurnOnLookLimit(
         new BTServiceFetchMasterWatcher(
           new BTReactiveSelector([
+            // ВЕТКА ДИАЛОГА: Бот останавливается и смотрит на игрока
+            DialogueSubtree(),
+
             // ВЕТКА 1: Подбор принесенных палок (с выбором: взять если близко, иначе идти за ней)
             new BTSequence([
               new BTConditionMasterCanPickupDeliveredStick(),
@@ -259,12 +276,12 @@ export function MasterFetchTree(): BTNode {
               new BTServicePathUpdater(
                 new BTReactiveSelector([
                   new BTSequence([
-                    new BTConditionDistance({ maxDistance: 1.2 }),
+                    new BTConditionDistance({ maxDistance: 1 }),
                     new BTActionPickup({ targetKey: 'targetId' }),
                   ]),
                   new BTActionFollow({
                     targetKey: 'targetId',
-                    stopDist: 0.6,
+                    stopDist: 0.42,
                     forceGait: 'walk',
                   }),
                 ])

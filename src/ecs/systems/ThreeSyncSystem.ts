@@ -37,6 +37,7 @@ import { Vec3 } from '../../types';
 import { getEffectiveLogicBrain } from '../utils/anatomy';
 import { AIDebugDTO, EntityOverlayDTO, ItemTooltipDTO } from '../../rendering/IRenderer';
 import { TrampleStamp } from '../../rendering/grass/TrampleTextureManager';
+import { VISUAL_CONFIG } from '../../config/visualConfig';
 
 const PROCEDURAL_PROP_SCALES: Record<
   string,
@@ -168,7 +169,14 @@ export class ThreeSyncSystem {
     depthWrite: false,
   });
   private matSelection = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
-  private matSilhouetteOutline = createOutlineShaderMaterial(0x2ecc71, 3.2);
+  private matSilhouetteOutline = createOutlineShaderMaterial(
+    VISUAL_CONFIG.selection.editorSelectedColor,
+    3.2
+  );
+  private matGameSilhouetteOutline = createOutlineShaderMaterial(
+    VISUAL_CONFIG.selection.gameSelectedColor,
+    3.2
+  );
   private matCelOutline = createOutlineShaderMaterial(0x151515, 2.0);
 
   constructor(scene: THREE.Scene, renderer?: THREE.WebGLRenderer) {
@@ -655,7 +663,10 @@ export class ThreeSyncSystem {
         obj.traverse((child) => {
           if (child instanceof THREE.Mesh && child.userData.isSelectionOutline) {
             if (isSelected) {
-              child.material = this.matSilhouetteOutline;
+              child.material =
+                _gameMode === GameMode.GAME
+                  ? this.matGameSilhouetteOutline
+                  : this.matSilhouetteOutline;
               child.visible = true;
             } else if (this.isCelShading) {
               child.material = this.matCelOutline;
@@ -729,6 +740,29 @@ export class ThreeSyncSystem {
               this.scene,
               (entId) => world.hasEntity(entId)
             );
+
+            // Прикрепление надетого на туловище рюкзака/брони к ноде Torso
+            const torsoEquipItems: string[] = [];
+            const parts = world.getComponent(id, 'assemblyRoot')?.partIds || [id];
+            for (const pId of parts) {
+              const eq = world.getComponent(pId, 'equip');
+              if (eq?.equipmentAreas) {
+                for (const area of eq.equipmentAreas) {
+                  if (area.type === 'torso' || area.id === 'torso') {
+                    torsoEquipItems.push(...area.itemIds);
+                  }
+                }
+              }
+            }
+            if (torsoEquipItems.length > 0) {
+              this.socketBinder.syncTorsoEquip(
+                animState,
+                torsoEquipItems,
+                this.meshes,
+                this.scene,
+                (entId) => world.hasEntity(entId)
+              );
+            }
           }
         }
         // 4. Фоллбэк-визуализация примитивов

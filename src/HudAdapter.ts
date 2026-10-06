@@ -14,7 +14,10 @@ import {
   MapZoneData,
   MapCreatureData,
   EquipAreaDTO,
+  ActiveReadingDTO,
 } from './components/gameHud/hudPorts';
+import { getDialogueGraph } from './dialogue/dialogueRegistry';
+import { EventBus } from './core/EventBus';
 import {
   getAnatomyParts,
   getAggregatedInteractionSlots,
@@ -42,6 +45,8 @@ function getFpColor(currentFp: number, maxFp: number): string {
 }
 
 export class HudAdapter implements IHudDataProvider {
+  private activeReading: ActiveReadingDTO | null = null;
+
   constructor(
     private world: World,
     private app: GameApp
@@ -353,10 +358,24 @@ export class HudAdapter implements IHudDataProvider {
     if (!meta && !item && !tag) return null;
 
     const arch = tag?.archetype ?? meta?.entityType;
+    const dialogueTarget = this.world.getComponent(targetId, 'dialogueTarget');
+    const readable = this.world.getComponent(targetId, 'readable');
+
+    const hasDialogue = Boolean(
+      dialogueTarget?.dialogueId && getDialogueGraph(dialogueTarget.dialogueId)
+    );
+    const isReadable = Boolean(
+      readable &&
+      ((readable.text && readable.text.trim().length > 0) ||
+        (readable.pages && readable.pages.length > 0))
+    );
+
     return {
       name: meta?.name ?? item?.name ?? targetId,
       isCreature: arch === 'creature',
       isItem: arch === 'item' || Boolean(item),
+      hasDialogue,
+      isReadable,
     };
   }
 
@@ -599,9 +618,68 @@ export class HudAdapter implements IHudDataProvider {
   }
 
   public startDialogue(targetId: string): boolean {
+    this.closeReading();
     const playerId = this.app.getPlayerEntityId();
     if (!playerId) return false;
     return this.app.simulation.dialogueSystem.startDialogue(this.world, targetId, playerId);
+  }
+
+  public startReading(targetId: string): boolean {
+    const readable = this.world.getComponent(targetId, 'readable');
+    if (!readable) return false;
+
+    this.closeDialogue();
+
+    const meta = this.world.getComponent(targetId, 'meta');
+    const item = this.world.getComponent(targetId, 'item');
+    const title = readable.title || meta?.name || item?.name || 'Чтение';
+
+    let pages: string[] = [];
+    if (readable.pages && readable.pages.length > 0) {
+      pages = [...readable.pages];
+    } else if (readable.text) {
+      pages = [readable.text];
+    } else {
+      pages = ['[Текст отсутствует]'];
+    }
+
+    const dto: ActiveReadingDTO = {
+      entityId: targetId,
+      title,
+      pages,
+      currentPage: Math.max(0, Math.min(pages.length - 1, readable.currentPage ?? 0)),
+      totalPages: pages.length,
+    };
+
+    this.activeReading = dto;
+    EventBus.emit('reading:state-changed', dto);
+    return true;
+  }
+
+  public setReadingPage(page: number): void {
+    if (!this.activeReading) return;
+    const clamped = Math.max(0, Math.min(this.activeReading.totalPages - 1, page));
+    this.activeReading = {
+      ...this.activeReading,
+      currentPage: clamped,
+    };
+
+    const readable = this.world.getComponent(this.activeReading.entityId, 'readable');
+    if (readable) {
+      readable.currentPage = clamped;
+    }
+
+    EventBus.emit('reading:state-changed', this.activeReading);
+  }
+
+  public closeReading(): void {
+    if (!this.activeReading) return;
+    this.activeReading = null;
+    EventBus.emit('reading:closed');
+  }
+
+  public getActiveReading(): ActiveReadingDTO | null {
+    return this.activeReading;
   }
 
   public chooseDialogueOption(choiceId: string): void {

@@ -148,9 +148,18 @@ export class GameSimulation {
           }
         }
 
+        const playerInput = this.world.getComponent(playerId, 'input');
+        // Если игрок зажал спринт и движется (убегает от цели), не фиксируем взгляд назад
+        const isSprintingAway =
+          playerInput?.isRunning &&
+          (playerInput.desiredMoveVector !== null ||
+            playerInput.isMovingForward ||
+            (playerInput.moveForward ?? 0) !== 0 ||
+            (playerInput.moveStrafe ?? 0) !== 0);
+
         if (shouldLose) {
           this.app.selection.selectGameTarget(null);
-        } else if (!this.app.throwTargeting && targetTrans) {
+        } else if (!this.app.throwTargeting && targetTrans && !isSprintingAway) {
           const targetPhys = this.world.getComponent(selectedId, 'physicsStats');
           const targetH = targetPhys?.height?.current ?? 1.8;
           const headRatio = BALANCE_CONFIG.camera.gameMode.headHeightRatio ?? 0.88;

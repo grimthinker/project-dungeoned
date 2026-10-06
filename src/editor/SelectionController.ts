@@ -174,7 +174,7 @@ export class SelectionController {
   public selectGameTarget(id: string | null): boolean {
     const playerId = this.host.getPlayerEntityId();
 
-    if (!id) {
+    const clearTarget = () => {
       if (this.selectedEntityId !== null) {
         this.selectEntity(null, true);
         if (playerId) {
@@ -182,27 +182,42 @@ export class SelectionController {
           if (bb) bb.remove('selectedId');
         }
       }
+    };
+
+    if (!id || id === 'terrain' || id === 'environment') {
+      clearTarget();
       return true;
     }
 
     // Запрещаем игроку выбирать самого себя
     const rootId = getRootOwner(this.host.world, id) ?? id;
     if (rootId === playerId || id === playerId) {
+      clearTarget();
       return false;
     }
 
     const entity = this.host.world.getEntity(rootId);
-    if (!entity) return false;
-
-    // Нельзя выбирать предметы, находящиеся в руках или инвентаре
-    if (this.host.world.getComponent(rootId, 'ownership')) {
+    if (!entity) {
+      clearTarget();
       return false;
     }
 
-    // В игровом режиме разрешено выбирать только интерактивные сущности
-    const hasInteractable = this.host.world.getComponent(rootId, 'interactable') !== undefined;
+    // Нельзя выбирать предметы, находящиеся в руках или инвентаре
+    if (this.host.world.getComponent(rootId, 'ownership')) {
+      clearTarget();
+      return false;
+    }
+
+    // В игровом режиме сущность интерактивна, если у нее есть interactable, диалог, текст для чтения,
+    // либо это существо, предмет или часть тела
+    const hasInteractable =
+      this.host.world.getComponent(rootId, 'interactable') !== undefined ||
+      Boolean(entity.dialogueTarget) ||
+      Boolean(entity.readable);
+
     const arch = entity.tag?.archetype ?? entity.meta?.entityType;
     if (!hasInteractable && arch !== 'creature' && arch !== 'item' && arch !== 'bodyPart') {
+      clearTarget();
       return false;
     }
 

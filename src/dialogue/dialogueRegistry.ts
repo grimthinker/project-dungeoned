@@ -1,6 +1,27 @@
 import { DialogueGraph } from './types';
 
 export const DIALOGUE_REGISTRY: Record<string, DialogueGraph> = {
+  dog_bark_dialogue: {
+    id: 'dog_bark_dialogue',
+    title: 'Собака',
+    startNodeId: 'node_bark',
+    nodes: {
+      node_bark: {
+        id: 'node_bark',
+        speaker: 'npc',
+        speakerName: 'Собака',
+        text: 'Гав!',
+        editorPosition: { x: 100, y: 150 },
+        choices: [
+          {
+            id: 'choice_out',
+            text: 'Окей',
+            targetNodeId: null,
+          },
+        ],
+      },
+    },
+  },
   default_npc_dialogue: {
     id: 'default_npc_dialogue',
     title: 'Разговор с жителем',
@@ -129,6 +150,10 @@ export const DIALOGUE_REGISTRY: Record<string, DialogueGraph> = {
   },
 };
 
-export function getDialogueGraph(dialogueId: string): DialogueGraph {
-  return DIALOGUE_REGISTRY[dialogueId] || DIALOGUE_REGISTRY['default_npc_dialogue'];
+export function getDialogueGraph(dialogueId: string): DialogueGraph | undefined {
+  return DIALOGUE_REGISTRY[dialogueId];
+}
+
+export function getAllDialogues(): Array<{ id: string; title: string }> {
+  return Object.values(DIALOGUE_REGISTRY).map((d) => ({ id: d.id, title: d.title }));
 }

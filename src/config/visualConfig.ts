@@ -10,6 +10,8 @@ export const VISUAL_CONFIG = {
   // Обводка при выделении и наведении курсора
   selection: {
     selectedColor: '#f1c40f',
+    gameSelectedColor: 0x38bdf8, // Светло-голубой для режима игры
+    editorSelectedColor: 0x2ecc71, // Зеленый для режима редактора/симуляции
     hoverColor: 'rgba(241, 196, 15, 0.4)',
     lineWidth: 3,
   },

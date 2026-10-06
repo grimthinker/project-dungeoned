@@ -74,4 +74,33 @@ export class RigSocketBinder {
       }
     }
   }
+
+  /**
+   * Прикрепляет экипированную броню, плащи или рюкзаки к соответствующим частям тела (например, на спину Torso).
+   */
+  public syncTorsoEquip(
+    animState: RigAnimatorState,
+    equippedTorsoItemIds: string[],
+    meshes: Map<string, THREE.Object3D>,
+    scene: THREE.Scene,
+    isEntityActive?: (id: string) => boolean
+  ): void {
+    const torsoBone = animState.rig.getObjectByName('Torso');
+    if (!torsoBone) return;
+
+    for (const itemId of equippedTorsoItemIds) {
+      const itemObj = meshes.get(itemId);
+      if (itemObj && itemObj.parent !== torsoBone) {
+        torsoBone.add(itemObj);
+        const grip = itemObj.userData.gripTransform as GripTransform | undefined;
+        if (grip) {
+          itemObj.position.copy(grip.position);
+          itemObj.quaternion.copy(grip.quaternion);
+        } else {
+          itemObj.position.set(0, 0, -0.22);
+          itemObj.rotation.set(0, Math.PI, 0);
+        }
+      }
+    }
+  }
 }

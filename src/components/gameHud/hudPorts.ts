@@ -120,10 +120,21 @@ export interface MapSnapshotDTO {
   playerPos?: { x: number; z: number; angle: number };
 }
 
+export interface ActiveReadingDTO {
+  entityId: string;
+  title: string;
+  text?: string;
+  pages?: string[];
+  currentPage: number;
+  totalPages: number;
+}
+
 export interface TargetPanelDTO {
   name: string;
   isCreature: boolean;
   isItem: boolean;
+  hasDialogue?: boolean;
+  isReadable?: boolean;
 }
 
 export interface InspectStatusDTO {
@@ -191,4 +202,9 @@ export interface IHudDataProvider {
   chooseDialogueOption(choiceId: string): void;
   closeDialogue(): void;
   getActiveDialogue(): ActiveDialogueDTO | null;
+
+  startReading(targetId: string): boolean;
+  setReadingPage(page: number): void;
+  closeReading(): void;
+  getActiveReading(): ActiveReadingDTO | null;
 }

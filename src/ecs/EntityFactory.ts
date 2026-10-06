@@ -200,7 +200,7 @@ export class EntityFactory {
       partIds: allPartIds,
     });
 
-    // 5. Создание и привязка стартовых предметов (например, сумки)
+    // 5. Создание и привязка стартовых предметов (рюкзак на спину, меч в руку)
     if (blueprint.defaultItems) {
       for (const itemDef of blueprint.defaultItems) {
         const targetPartId = partKeyToId.get(itemDef.targetPartKey);
@@ -213,11 +213,18 @@ export class EntityFactory {
 
           ARCHETYPE_ASSEMBLERS.item(world, physics, aiSystem, itemId, itemConfig, position);
 
-          const targetEquip = world.getComponent(targetPartId, 'equip');
-          if (targetEquip) {
-            const area = targetEquip.equipmentAreas.find((a) => a.type === itemDef.targetAreaType);
-            if (area) {
-              area.itemIds.push(itemId);
+          const targetSlots = world.getComponent(targetPartId, 'interactionSlots');
+          if (targetSlots && targetSlots.itemId === null && itemConfig.item?.type === 'weapon') {
+            targetSlots.itemId = itemId;
+          } else {
+            const targetEquip = world.getComponent(targetPartId, 'equip');
+            if (targetEquip) {
+              const area = targetEquip.equipmentAreas.find(
+                (a) => a.type === itemDef.targetAreaType
+              );
+              if (area) {
+                area.itemIds.push(itemId);
+              }
             }
           }
         }

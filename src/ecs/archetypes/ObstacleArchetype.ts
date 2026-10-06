@@ -186,6 +186,18 @@ export function createSignpostConfig(position?: Vec3, angle: Radians = 0 as Radi
       hp: 80,
       destructible: true,
     },
+    readable: {
+      title: 'Указатель дорог',
+      text: '← Северный тракт (Столица)\n→ Старая сторожевая башня\n↑ Заповедный лес и охотничьи угодья',
+    },
+    interactable: {
+      options: [
+        { id: 'read', verb: 'read', label: 'Читать', icon: '📖' },
+        { id: 'inspect', verb: 'inspect', label: 'Осмотреть', icon: '🔍' },
+      ],
+      defaultVerb: 'read',
+      interactDistance: 3.0,
+    },
   };
 }
 
@@ -226,6 +238,18 @@ export function createSignpostSingleConfig(
       maxHp: 60,
       hp: 60,
       destructible: true,
+    },
+    readable: {
+      title: 'Предупреждающий знак',
+      text: 'ВНИМАНИЕ ПУТНИКАМ!\nВпереди опасные топи и логово волков.\nДержите оружие наготове.',
+    },
+    interactable: {
+      options: [
+        { id: 'read', verb: 'read', label: 'Читать', icon: '📖' },
+        { id: 'inspect', verb: 'inspect', label: 'Осмотреть', icon: '🔍' },
+      ],
+      defaultVerb: 'read',
+      interactDistance: 3.0,
     },
   };
 }
@@ -720,4 +744,16 @@ export function assembleObstacle(
     isVisible: true,
     syncWithTransform: true,
   });
+
+  if (config.readable) {
+    world.addComponent(id, 'readable', fastClone(config.readable));
+  }
+
+  if (config.interactable) {
+    world.addComponent(id, 'interactable', fastClone(config.interactable));
+  }
+
+  if (config.dialogueTarget) {
+    world.addComponent(id, 'dialogueTarget', fastClone(config.dialogueTarget));
+  }
 }

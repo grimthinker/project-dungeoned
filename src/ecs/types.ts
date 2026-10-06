@@ -17,7 +17,9 @@ export * from './components/water';
 export * from './components/zone';
 export * from './components/interaction';
 export * from './components/dialogue';
+export * from './components/readable';
 
+import { ReadableComponent } from './components/readable';
 import { FetchStickComponent } from './components/fetch';
 import { DialogueTargetComponent, InDialogueComponent } from './components/dialogue';
 import { ZoneShapeComponent, GameplayZoneComponent } from './components/zone';
@@ -157,6 +159,7 @@ export interface EntityComponents {
   interactable?: InteractableComponent;
   dialogueTarget?: DialogueTargetComponent;
   inDialogue?: InDialogueComponent;
+  readable?: ReadableComponent;
 }
 
 export const SERIALIZABLE_COMPONENT_KEYS: ReadonlyArray<keyof EntityComponents> = [
@@ -212,6 +215,7 @@ export const SERIALIZABLE_COMPONENT_KEYS: ReadonlyArray<keyof EntityComponents> 
   'gameplayZone',
   'interactable',
   'dialogueTarget',
+  'readable',
 ] as const;
 
 export interface EntityConfig {
@@ -258,4 +262,5 @@ export interface EntityConfig {
   gameplayZone?: GameplayZoneComponent;
   interactable?: InteractableComponent;
   dialogueTarget?: DialogueTargetComponent;
+  readable?: ReadableComponent;
 }

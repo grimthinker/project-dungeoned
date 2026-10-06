@@ -1,4 +1,5 @@
-export type InteractionVerb = 'inspect' | 'take' | 'follow' | 'push' | 'talk' | 'use' | string;
+export type InteractionVerb =
+  'inspect' | 'take' | 'follow' | 'push' | 'talk' | 'use' | 'read' | string;
 
 export interface InteractionOption {
   id: string;

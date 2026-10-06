@@ -48,6 +48,9 @@ export function spawnFetchGroup(simulation: GameSimulation, origin: Vec3): Spawn
     masterTrans.rotation = { x: 0, y: 1, z: 0, w: 0 };
   }
 
+  // Привязка базового диалога к Хозяину
+  world.addComponent(masterId, 'dialogueTarget', { dialogueId: 'default_npc_dialogue' });
+
   // 2. Спавн двух мячей в руки Хозяина
   const ballIds: string[] = [];
   const masterParts = getAnatomyParts(world, masterId);
@@ -147,6 +150,9 @@ export function spawnFetchGroup(simulation: GameSimulation, origin: Vec3): Spawn
       'DogFetchTree',
       dogName
     );
+
+    // Привязка диалога лая к собаке
+    world.addComponent(dogId, 'dialogueTarget', { dialogueId: 'dog_bark_dialogue' });
 
     // Поворачиваем собаку мордой к Хозяину
     const dogTrans = world.getComponent(dogId, 'transform');

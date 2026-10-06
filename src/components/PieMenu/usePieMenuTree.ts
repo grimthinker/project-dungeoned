@@ -367,7 +367,7 @@ export function usePieMenuTree({
                       restitution: 0.88,
                       friction: 0.85,
                       linearDamping: 0.25,
-                      angularDamping: 2.0,
+                      angularDamping: 1.0,
                     },
                     weaponStats: { baseDamage: 5, prepTime: 0.2, recoveryTime: 0.3 },
                     weaponZone: { hitZoneType: 'forward_line', length: 1.5 },

@@ -138,7 +138,7 @@ export const BlockTargetPanel: React.FC<BlockTargetPanelProps> = ({
 
       {/* Кнопки действий цели */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        {isCreature && (
+        {targetInfo.hasDialogue && (
           <button
             type="button"
             style={RETRO_BUTTON_STYLE}
@@ -148,13 +148,15 @@ export const BlockTargetPanel: React.FC<BlockTargetPanelProps> = ({
           </button>
         )}
 
-        <button
-          type="button"
-          style={{ ...RETRO_BUTTON_STYLE, opacity: 0.7 }}
-          onClick={() => alert('Команда «Читать» (заглушка)')}
-        >
-          📖 {t('interaction.read')}
-        </button>
+        {targetInfo.isReadable && (
+          <button
+            type="button"
+            style={RETRO_BUTTON_STYLE}
+            onClick={() => hudProvider.startReading(targetId)}
+          >
+            📖 {t('interaction.read')}
+          </button>
+        )}
 
         <button type="button" style={RETRO_BUTTON_STYLE} onClick={() => onOpenInspect(targetId)}>
           🔍 {t('interaction.inspect')}

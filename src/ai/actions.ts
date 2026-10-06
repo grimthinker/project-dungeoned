@@ -1225,6 +1225,59 @@ export class BTConditionInsideZone extends BTSimpleAction {
   }
 }
 
+export class BTConditionInDialogue extends BTSimpleAction {
+  public static readonly nodeName = 'Бот в диалоге';
+  public static readonly description = 'Проверяет, ведется ли в данный момент диалог с этим ботом';
+
+  protected onTick(entity: IAIAgent): NodeStatus {
+    return entity.isInDialogue ? NodeStatus.SUCCESS : NodeStatus.FAILURE;
+  }
+}
+
+export class BTActionDialogueLookAtPartner extends BTAction {
+  public static readonly nodeName = 'Смотреть на собеседника';
+  public static readonly description =
+    'Останавливает движение и непрерывно удерживает взгляд на собеседнике в диалоге';
+
+  protected onOpen(entity: IAIAgent): void {
+    entity.clearMoveTarget();
+  }
+
+  protected onTick(entity: IAIAgent): NodeStatus {
+    if (!entity.isInDialogue) {
+      return NodeStatus.FAILURE;
+    }
+
+    entity.clearMoveTarget();
+
+    const partnerId = entity.getDialoguePartnerId();
+    if (!partnerId || !entity.world.isEntityAlive(partnerId)) {
+      return NodeStatus.FAILURE;
+    }
+
+    const partnerPos = entity.world.getEntityPos(partnerId);
+    if (!partnerPos) return NodeStatus.FAILURE;
+
+    const selfPos = entity.getPos();
+    const dx = partnerPos.x - selfPos.x;
+    const dz = partnerPos.z - selfPos.z;
+    const distXZ = Math.hypot(dx, dz);
+
+    if (distXZ > 0.001) {
+      const myHeight = entity.getPhysicsHeight();
+      const partnerHeight = entity.world.getEntityHeight(partnerId);
+      const dy = partnerPos.y + partnerHeight * 0.75 - (selfPos.y + myHeight * 0.85);
+      entity.setLookTarget(Math.atan2(dz, dx) as Radians, Math.atan2(dy, distXZ) as Radians);
+    }
+
+    return NodeStatus.RUNNING;
+  }
+
+  protected stopAction(entity: IAIAgent): void {
+    entity.clearLookTarget();
+  }
+}
+
 export class BTActionGetRandomPointInZone extends BTSimpleAction {
   public static readonly nodeName = 'Точка в зоне';
   public static readonly description =

@@ -107,6 +107,15 @@ export function computeDetachedLimbGrip(limbGroup: THREE.Group, subType?: string
  * Рассчитывает точку хвата для обычных предметов, оружия и примитивов
  */
 export function computeItemGrip(itemObj: THREE.Object3D, _itemType?: string): GripTransform {
+  if (itemObj.name === 'BackpackRoot' || itemObj.getObjectByName('BackpackRoot')) {
+    const quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI, 0));
+    // При нахождении на спине смещаем рюкзак назад от центра туловища на 0.22м
+    return {
+      position: new THREE.Vector3(0, 0, -0.22),
+      quaternion: quat,
+    };
+  }
+
   // 1. Поиск явной ноды рукояти в 3D-модели (GripPoint / Handle)
   const explicitGrip =
     itemObj.getObjectByName('GripPoint') ||

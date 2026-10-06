@@ -2,6 +2,7 @@ import { BTNodeDTO } from '../ai/core';
 import { GameMode } from '../config/gameConfig';
 import { TreeBBSchema } from '../ai/schema';
 import { ActiveDialogueDTO } from '../dialogue/types';
+import { ActiveReadingDTO } from '../components/gameHud/hudPorts';
 
 export interface EventMap {
   'engine:state-changed': {
@@ -41,6 +42,8 @@ export interface EventMap {
   'zone:exited': { zoneId: string; entityId: string };
   'dialogue:state-changed': ActiveDialogueDTO;
   'dialogue:closed': void;
+  'reading:state-changed': ActiveReadingDTO;
+  'reading:closed': void;
 }
 
 type EventCallback<T> = (data: T) => void;

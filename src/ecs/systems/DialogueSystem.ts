@@ -42,9 +42,20 @@ export class DialogueSystem {
     const playerHealth = world.getComponent(playerId, 'health');
     if (!npcHealth?.isAlive || !playerHealth?.isAlive) return false;
 
+    const pTrans = world.getComponent(playerId, 'transform');
+    const nTrans = world.getComponent(npcId, 'transform');
+    if (pTrans && nTrans) {
+      const dist = Math.hypot(pTrans.x - nTrans.x, pTrans.z - nTrans.z);
+      if (dist > DIALOGUE_CONFIG.startInteractionDistance) {
+        return false;
+      }
+    }
+
     const dialogueTarget = world.getComponent(npcId, 'dialogueTarget');
-    const dialogueId = dialogueTarget?.dialogueId || 'default_npc_dialogue';
+    if (!dialogueTarget || !dialogueTarget.dialogueId) return false;
+    const dialogueId = dialogueTarget.dialogueId;
     const graph = getDialogueGraph(dialogueId);
+    if (!graph) return false;
 
     const startNode = graph.nodes[graph.startNodeId];
     if (!startNode) return false;
@@ -206,25 +217,6 @@ export class DialogueSystem {
     if (dist > DIALOGUE_CONFIG.maxInteractionDistance) {
       this.closeDialogue(world);
       return;
-    }
-
-    // 3. Поворот NPC и Игрока лицом друг к другу
-    const dx = pTrans.x - nTrans.x;
-    const dz = pTrans.z - nTrans.z;
-    const angleToPlayer = Math.atan2(dz, dx) as Radians;
-    const angleToNpc = Math.atan2(-dz, -dx) as Radians;
-
-    const nInput = world.getComponent(npcId, 'input');
-    if (nInput) {
-      nInput.targetLookAngle = angleToPlayer;
-      nInput.desiredBodyAngle = angleToPlayer;
-      nInput.desiredMoveVector = null;
-      nInput.isMovingForward = false;
-    }
-
-    const pInput = world.getComponent(playerId, 'input');
-    if (pInput && pInput.desiredMoveVector === null && !pInput.isMovingForward) {
-      pInput.targetLookAngle = angleToNpc;
     }
   }
 

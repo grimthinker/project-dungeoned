@@ -92,6 +92,8 @@ export interface IAIAgent {
   getAttackStatus(): AttackStatus;
   hasPendingAttackRequest(): boolean;
   getCurrentInteraction(): ActiveInteraction | null;
+  readonly isInDialogue: boolean;
+  getDialoguePartnerId(): string | null;
 
   // Актуаторы: Движение
   clearMoveTarget(): void;

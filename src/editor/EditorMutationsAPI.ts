@@ -965,4 +965,89 @@ export class EditorMutationsAPI {
     Object.assign(zone, patch);
     return true;
   }
+
+  public addEntityDialogue(id: string, dialogueId?: string): boolean {
+    const defaultId = dialogueId || 'default_npc_dialogue';
+    this.world.addComponent(id, 'dialogueTarget', { dialogueId: defaultId });
+
+    let interactable = this.world.getComponent(id, 'interactable');
+    if (!interactable) {
+      interactable = {
+        options: [{ id: 'talk', verb: 'talk', label: 'Говорить', icon: '💬' }],
+        defaultVerb: 'talk',
+        interactDistance: 4.0,
+      };
+      this.world.addComponent(id, 'interactable', interactable);
+    } else if (!interactable.options.some((o) => o.verb === 'talk')) {
+      interactable.options.unshift({ id: 'talk', verb: 'talk', label: 'Говорить', icon: '💬' });
+    }
+    return true;
+  }
+
+  public updateEntityDialogue(id: string, dialogueId: string): boolean {
+    let target = this.world.getComponent(id, 'dialogueTarget');
+    if (!target) {
+      return this.addEntityDialogue(id, dialogueId);
+    }
+    target.dialogueId = dialogueId;
+    return true;
+  }
+
+  public removeEntityDialogue(id: string): boolean {
+    if (!this.world.getComponent(id, 'dialogueTarget')) return false;
+    this.world.removeComponent(id, 'dialogueTarget');
+
+    const interactable = this.world.getComponent(id, 'interactable');
+    if (interactable) {
+      interactable.options = interactable.options.filter((o) => o.verb !== 'talk');
+      if (interactable.options.length === 0) {
+        this.world.removeComponent(id, 'interactable');
+      }
+    }
+    return true;
+  }
+
+  public addEntityReadable(id: string, text: string = '', title?: string): boolean {
+    this.world.addComponent(id, 'readable', { title: title || '', text, pages: [] });
+
+    let interactable = this.world.getComponent(id, 'interactable');
+    if (!interactable) {
+      interactable = {
+        options: [
+          { id: 'read', verb: 'read', label: 'Читать', icon: '📖' },
+          { id: 'inspect', verb: 'inspect', label: 'Осмотреть', icon: '🔍' },
+        ],
+        defaultVerb: 'read',
+        interactDistance: 4.0,
+      };
+      this.world.addComponent(id, 'interactable', interactable);
+    } else if (!interactable.options.some((o) => o.verb === 'read')) {
+      interactable.options.unshift({ id: 'read', verb: 'read', label: 'Читать', icon: '📖' });
+    }
+    return true;
+  }
+
+  public updateEntityReadable(
+    id: string,
+    patch: Partial<import('../ecs/components/readable').ReadableComponent>
+  ): boolean {
+    const readable = this.world.getComponent(id, 'readable');
+    if (!readable) return false;
+    Object.assign(readable, patch);
+    return true;
+  }
+
+  public removeEntityReadable(id: string): boolean {
+    if (!this.world.getComponent(id, 'readable')) return false;
+    this.world.removeComponent(id, 'readable');
+
+    const interactable = this.world.getComponent(id, 'interactable');
+    if (interactable) {
+      interactable.options = interactable.options.filter((o) => o.verb !== 'read');
+      if (interactable.options.length === 0) {
+        this.world.removeComponent(id, 'interactable');
+      }
+    }
+    return true;
+  }
 }

@@ -28,6 +28,8 @@ import {
   WaterInspector,
   ZoneShapeInspector,
   GameplayZoneInspector,
+  DialogueInspector,
+  ReadableInspector,
 } from './inspector/index';
 import { getAnatomyParts } from '../ecs/utils/hierarchy';
 import { EDITOR_CONFIG } from '../config/editorConfig';
@@ -143,6 +145,8 @@ export const Inspector: React.FC<InspectorProps> = ({
     water: true,
     zoneShape: true,
     gameplayZone: true,
+    dialogue: true,
+    readable: true,
   });
 
   const toggleSection = (key: string) => {
@@ -267,6 +271,16 @@ export const Inspector: React.FC<InspectorProps> = ({
     currentArchetype === 'bodyPart' ||
     currentArchetype === 'item';
 
+  const canHaveDialogue =
+    currentArchetype === 'creature' ||
+    currentArchetype === 'item' ||
+    currentArchetype === 'obstacle';
+
+  const canHaveReadable =
+    currentArchetype === 'obstacle' ||
+    currentArchetype === 'item' ||
+    currentArchetype === 'creature';
+
   const canHaveInventory =
     (currentArchetype === 'item' ||
       currentArchetype === 'creature' ||
@@ -386,6 +400,134 @@ export const Inspector: React.FC<InspectorProps> = ({
 
           {world.getComponent(targetId, 'aiStats') &&
             renderSection('ai', t('inspector.ai'), <AIInspector {...commonProps} />)}
+
+          {canHaveDialogue &&
+            (world.getComponent(targetId, 'dialogueTarget')
+              ? renderSection(
+                  'dialogue',
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      width: '100%',
+                      paddingRight: '4px',
+                    }}
+                  >
+                    <span>Диалог</span>
+                    {!isReadOnly && (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        style={{
+                          backgroundColor: '#c0392b',
+                          color: '#fff',
+                          padding: '1px 6px',
+                          fontSize: '10px',
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (app) {
+                            app.mutations.removeEntityDialogue(targetId);
+                            requestCommit('Удаление диалога');
+                          }
+                        }}
+                      >
+                        ✕ Удалить
+                      </button>
+                    )}
+                  </div>,
+                  <DialogueInspector {...commonProps} />
+                )
+              : !isReadOnly && (
+                  <div style={{ marginBottom: '8px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      style={{
+                        width: '100%',
+                        backgroundColor: '#2c3e50',
+                        color: '#fff',
+                        padding: '6px',
+                        fontSize: '11px',
+                        borderRadius: '4px',
+                        border: '1px solid #444',
+                      }}
+                      onClick={() => {
+                        if (app) {
+                          app.mutations.addEntityDialogue(targetId);
+                          requestCommit('Добавление диалога');
+                        }
+                      }}
+                    >
+                      💬 + Добавить диалог
+                    </button>
+                  </div>
+                ))}
+
+          {canHaveReadable &&
+            (world.getComponent(targetId, 'readable')
+              ? renderSection(
+                  'readable',
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      width: '100%',
+                      paddingRight: '4px',
+                    }}
+                  >
+                    <span>Текст для чтения</span>
+                    {!isReadOnly && (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        style={{
+                          backgroundColor: '#c0392b',
+                          color: '#fff',
+                          padding: '1px 6px',
+                          fontSize: '10px',
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (app) {
+                            app.mutations.removeEntityReadable(targetId);
+                            requestCommit('Удаление читаемого текста');
+                          }
+                        }}
+                      >
+                        ✕ Удалить
+                      </button>
+                    )}
+                  </div>,
+                  <ReadableInspector {...commonProps} />
+                )
+              : !isReadOnly && (
+                  <div style={{ marginBottom: '8px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      style={{
+                        width: '100%',
+                        backgroundColor: '#2c3e50',
+                        color: '#fff',
+                        padding: '6px',
+                        fontSize: '11px',
+                        borderRadius: '4px',
+                        border: '1px solid #444',
+                      }}
+                      onClick={() => {
+                        if (app) {
+                          app.mutations.addEntityReadable(targetId, '');
+                          requestCommit('Добавление читаемого текста');
+                        }
+                      }}
+                    >
+                      📖 + Добавить текст для чтения
+                    </button>
+                  </div>
+                ))}
 
           {world.getComponent(targetId, 'zoneShape') &&
             renderSection(

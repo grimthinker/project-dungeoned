@@ -15,6 +15,7 @@ export interface RetroWindowProps {
   zIndex?: number;
   storageKey?: string;
   resizable?: boolean;
+  resizableBottom?: boolean;
 }
 
 export const RetroWindow: React.FC<RetroWindowProps> = ({
@@ -31,6 +32,7 @@ export const RetroWindow: React.FC<RetroWindowProps> = ({
   zIndex = 90,
   storageKey,
   resizable = true,
+  resizableBottom = false,
 }) => {
   const effectiveKey = storageKey || `hud_window_${title.replace(/[^a-zA-Zа-яА-Я0-9_]/g, '_')}`;
 
@@ -148,10 +150,9 @@ export const RetroWindow: React.FC<RetroWindowProps> = ({
       const handleMouseMove = (moveEvt: MouseEvent) => {
         const dx = moveEvt.clientX - startX;
         const dy = moveEvt.clientY - startY;
-        const nextW = Math.max(
-          minWidth,
-          Math.min(window.innerWidth - posRef.current.x, originW + dx)
-        );
+        const nextW = resizableBottom
+          ? originW
+          : Math.max(minWidth, Math.min(window.innerWidth - posRef.current.x, originW + dx));
         const nextH = Math.max(
           minHeight,
           Math.min(window.innerHeight - posRef.current.y, originH + dy)
@@ -225,8 +226,37 @@ export const RetroWindow: React.FC<RetroWindowProps> = ({
         {children}
       </div>
 
+      {/* Нижняя ручка изменения высоты окна */}
+      {resizableBottom && (
+        <div
+          onMouseDown={handleResizeMouseDown}
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 8,
+            cursor: 'ns-resize',
+            zIndex: 16,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          title="Потяните для изменения высоты окна"
+        >
+          <div
+            style={{
+              width: 36,
+              height: 3,
+              backgroundColor: '#444',
+              borderRadius: 2,
+            }}
+          />
+        </div>
+      )}
+
       {/* Уголок масштабирования размера окна (Resize Handle) */}
-      {resizable && (
+      {resizable && !resizableBottom && (
         <div
           onMouseDown={handleResizeMouseDown}
           style={{

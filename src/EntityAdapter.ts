@@ -139,6 +139,14 @@ export class EntityAdapter implements IAIAgent {
     return act ? { type: act.type, phase: act.phase, targetId: act.targetId } : null;
   }
 
+  public get isInDialogue(): boolean {
+    return this.worldEcs.getComponent(this.id, 'inDialogue') !== undefined;
+  }
+
+  public getDialoguePartnerId(): string | null {
+    return this.worldEcs.getComponent(this.id, 'inDialogue')?.withEntityId ?? null;
+  }
+
   // === АКТУАТОРЫ ===
 
   public clearMoveTarget(): void {
