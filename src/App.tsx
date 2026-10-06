@@ -17,6 +17,7 @@ import { MainMenu } from './components/MainMenu';
 import { HotkeysModal } from './components/HotkeysModal';
 import { CreatureWizardModal, NewWorldModal, SettingsModal } from './components/modals';
 import { GameHUD } from './components/GameHUD';
+import { DialogueEditorWorkspace } from './components/dialogueEditor/DialogueEditorWorkspace';
 import { BodyStructureType } from './ecs/templates';
 import { ModularPlacementOptions } from './types';
 import { CanvasHUD } from './components/CanvasHUD';
@@ -93,6 +94,7 @@ export const App: React.FC = () => {
   const [isCreatureWizardOpen, setIsCreatureWizardOpen] = useState(false);
   const [isNewWorldModalOpen, setIsNewWorldModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [activeDialogueEditorId, setActiveDialogueEditorId] = useState<string | null>(null);
 
   const { setApp } = useDragDrop();
 
@@ -157,12 +159,17 @@ export const App: React.FC = () => {
       syncPlayerControls();
     });
 
+    const unsubOpenDialogue = EventBus.on('dialogue:open-editor', ({ dialogueId }) => {
+      setActiveDialogueEditorId(dialogueId || 'default_npc_dialogue');
+    });
+
     return () => {
       unsubState();
       unsubSelection();
       unsubBT();
       unsubPlayerDied();
       unsubWorld();
+      unsubOpenDialogue();
     };
   }, [syncPlayerControls]);
 
@@ -555,6 +562,7 @@ export const App: React.FC = () => {
       {engineState.mode !== GameMode.GAME && engineState.mode !== GameMode.MENU && (
         <TopBar
           mode={engineState.mode}
+          onOpenDialogueEditor={() => setActiveDialogueEditorId('default_npc_dialogue')}
           goToEditor={goToEditor}
           goToSimulation={goToSimulation}
           goToGame={goToGame}
@@ -756,9 +764,17 @@ export const App: React.FC = () => {
             world={appRef.current?.world}
             onCommitHistory={handleCommitHistory}
             handleDeleteEntity={handleDeleteEntity}
+            onOpenDialogueEditor={(dId) => setActiveDialogueEditorId(dId)}
           />
         )}
       </div>
+
+      {activeDialogueEditorId && (
+        <DialogueEditorWorkspace
+          initialDialogueId={activeDialogueEditorId}
+          onClose={() => setActiveDialogueEditorId(null)}
+        />
+      )}
 
       <HotkeysModal isOpen={isHotkeysOpen} onClose={() => setIsHotkeysOpen(false)} />
       <CreatureWizardModal

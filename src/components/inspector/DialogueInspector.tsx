@@ -9,6 +9,7 @@ export interface DialogueInspectorProps {
   app?: GameApp | null;
   isReadOnly?: boolean;
   onCommit: (desc: string) => void;
+  onOpenDialogueEditor?: (dialogueId: string) => void;
 }
 
 export const DialogueInspector: React.FC<DialogueInspectorProps> = ({
@@ -17,6 +18,7 @@ export const DialogueInspector: React.FC<DialogueInspectorProps> = ({
   app,
   isReadOnly,
   onCommit,
+  onOpenDialogueEditor,
 }) => {
   const dialogueTarget = world.getComponent(targetId, 'dialogueTarget');
   const [search, setSearch] = useState('');
@@ -58,7 +60,30 @@ export const DialogueInspector: React.FC<DialogueInspectorProps> = ({
           border: '1px solid #333',
         }}
       >
-        <div style={{ fontSize: '11px', color: '#888', marginBottom: '2px' }}>Текущий диалог:</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: '11px', color: '#888', marginBottom: '2px' }}>
+            Текущий диалог:
+          </div>
+          {currentDialogueId && onOpenDialogueEditor && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => onOpenDialogueEditor(currentDialogueId)}
+              style={{
+                backgroundColor: '#2980b9',
+                color: '#fff',
+                padding: '2px 6px',
+                fontSize: '10px',
+                border: 'none',
+                borderRadius: '3px',
+                cursor: 'pointer',
+              }}
+              title="Открыть в визуальном нодовом редакторе"
+            >
+              Редактировать граф ↗
+            </button>
+          )}
+        </div>
         <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#2ecc71' }}>
           {currentDialogue ? currentDialogue.title : currentDialogueId || 'Не выбран'}
         </div>

@@ -37,6 +37,7 @@ export const en = {
     celShading: 'Cel Shading',
     fpsMonitor: 'Monitor',
     hotkeysTitle: 'Hotkeys',
+    dialogues: 'Dialogues',
   },
   mainMenu: {
     title: 'DUNGEONED',

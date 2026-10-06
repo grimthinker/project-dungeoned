@@ -51,6 +51,7 @@ export interface InspectorProps {
   onCommitHistory: (description: string) => void;
   onUpdateStats?: () => void;
   handleDeleteEntity: () => void;
+  onOpenDialogueEditor?: (dialogueId: string) => void;
 }
 
 const contentStyle: React.CSSProperties = {
@@ -66,6 +67,7 @@ export const Inspector: React.FC<InspectorProps> = ({
   world,
   onCommitHistory,
   handleDeleteEntity,
+  onOpenDialogueEditor,
 }) => {
   const isReadOnly = mode !== GameMode.EDITOR;
 
@@ -298,6 +300,7 @@ export const Inspector: React.FC<InspectorProps> = ({
     app: app, // Передаем настоящий GameApp (он перехватит вызовы через свои методы-фасады)
     isReadOnly,
     onCommit: requestCommit,
+    onOpenDialogueEditor,
   };
 
   return (

@@ -42,6 +42,8 @@ export interface EventMap {
   'zone:exited': { zoneId: string; entityId: string };
   'dialogue:state-changed': ActiveDialogueDTO;
   'dialogue:closed': void;
+  'dialogue:registry-updated': void;
+  'dialogue:open-editor': { dialogueId?: string };
   'reading:state-changed': ActiveReadingDTO;
   'reading:closed': void;
 }

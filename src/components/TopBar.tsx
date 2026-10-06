@@ -32,6 +32,7 @@ export interface TopBarProps {
   setCelShading: (val: boolean) => void;
   showFPSMonitor: boolean;
   setShowFPSMonitor: (val: boolean) => void;
+  onOpenDialogueEditor?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -64,6 +65,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   setCelShading,
   showFPSMonitor,
   setShowFPSMonitor,
+  onOpenDialogueEditor,
 }) => {
   const [isFileMenuOpen, setIsFileMenuOpen] = useState(false);
   const locale = useLocale();
@@ -239,6 +241,24 @@ export const TopBar: React.FC<TopBarProps> = ({
             {t('topbar.redo')}
           </button>
         </div>
+
+        {onOpenDialogueEditor && mode === GameMode.EDITOR && (
+          <button
+            className="btn btn-sm"
+            style={{
+              backgroundColor: '#16a085',
+              color: '#fff',
+              border: 'none',
+              marginLeft: '4px',
+              padding: '4px 10px',
+              fontWeight: 'bold',
+            }}
+            onClick={onOpenDialogueEditor}
+            title="Открыть визуальный редактор графов диалогов"
+          >
+            💬 Диалоги
+          </button>
+        )}
       </div>
 
       {/* Центральная часть: Режимы и Пауза */}

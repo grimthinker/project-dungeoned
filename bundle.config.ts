@@ -148,16 +148,15 @@ export const DOMAINS = {
     'src/ecs/components/zone.ts',
   ],
 
-  // Новый домен для многосторонних диалогов с ролями
-  dialogueMultiNPC: [
+  // Визуальный нодовый редактор диалогов (@xyflow/react)
+  dialogue_editor: [
     'src/dialogue/**/*',
+    'src/components/dialogueEditor/**/*',
+    'src/components/inspector/DialogueInspector.tsx',
+    'src/components/gameHud/BlockDialogue.tsx',
     'src/ecs/systems/DialogueSystem.ts',
     'src/ecs/components/dialogue.ts',
-    'src/components/gameHud/BlockDialogue.tsx',
-    'src/components/gameHud/hudPorts.ts',
-    'src/HudAdapter.ts',
-    'src/types.ts',
-    'src/utils.ts',
+    'src/ecs/WorldSerializer.ts',
   ],
 
   // Полная сборка (на случай глобальных задач)

@@ -22,6 +22,8 @@ import {
 import { TerrainComponent } from './components/terrain';
 import { buildObstacleColliders } from './utils/obstacleColliders';
 import { StoryFlagsManager } from '../dialogue/StoryFlagsManager';
+import { DialogueGraph } from '../dialogue/types';
+import { getAllDialogueGraphs, loadDialogues } from '../dialogue/dialogueRegistry';
 
 export interface SerializedTerrainData {
   width?: number;
@@ -58,6 +60,7 @@ export interface SerializedEntityData {
 export interface SerializedWorldData {
   entities: SerializedEntityData[];
   storyFlags?: Record<string, any>;
+  dialogues?: Record<string, DialogueGraph>;
 }
 
 export class WorldSerializer {
@@ -122,6 +125,7 @@ export class WorldSerializer {
     return {
       entities: this.serializeEntities(allIds),
       storyFlags: StoryFlagsManager.getAllFlags(),
+      dialogues: getAllDialogueGraphs(),
     };
   }
 
@@ -695,6 +699,7 @@ export class WorldSerializer {
     }
 
     StoryFlagsManager.loadFlags(data.storyFlags ?? data.world?.storyFlags);
+    loadDialogues(data.dialogues ?? data.world?.dialogues);
 
     const cameraData = data.camera ?? data.world?.camera;
     if (cameraData) {
