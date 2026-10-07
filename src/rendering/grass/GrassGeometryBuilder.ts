@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GRASS_CONFIG } from '../../config/grassConfig';
+import { FLOWER_BY_VARIANT, FoliageVariant } from './GrassVariants';
 
 export interface GrassClusterOptions {
   bladeCount?: number;
@@ -45,19 +46,134 @@ export class GrassGeometryBuilder {
     );
   }
 
+  /**
+   * Геометрия дальнего LOD для конкретного вида растительности.
+   *
+   * Принцип: упрощается только стоимость, но НЕ силуэт и НЕ цвет — высота,
+   * ширина, радиус корня и палитра берутся из тех же параметров, что и у полной
+   * геометрии. Поэтому переключение LOD не читается на экране (важно, потому
+   * что LOD выбирается для отдельных инстансов в полосе перехода).
+   */
+  public static createLowDetailGeometry(variant: FoliageVariant): THREE.BufferGeometry {
+    switch (variant) {
+      case 'grass3':
+      case 'grass4':
+      case 'grass5':
+      case 'dryGrass':
+        return GrassGeometryBuilder.createLowBladeGeometry(variant);
+      case 'wheat':
+        return GrassGeometryBuilder.createLowWheatGeometry();
+      case 'reeds':
+        return GrassGeometryBuilder.createLowReedsGeometry();
+      default:
+        return GrassGeometryBuilder.createLowFlowerGeometry(FLOWER_BY_VARIANT[variant]);
+    }
+  }
+
+  /**
+   * Параметры пучковых вариантов. Значения намеренно совпадают с дефолтами
+   * `createClusterGeometry` и с аргументами `createDryGrassGeometry` —
+   * от них зависит бесшовность перехода полная геометрия -> упрощенная.
+   */
+  private static bladeParamsFor(variant: FoliageVariant): {
+    bladeCount: number;
+    height: number;
+    baseWidth: number;
+    tipWidth: number;
+    curveStrength: number;
+    rootRadius: number;
+    rootColor: THREE.Color;
+    tipColor: THREE.Color;
+    gradientPower: number;
+  } {
+    switch (variant) {
+      case 'grass3':
+        return {
+          bladeCount: 3,
+          height: GRASS_CONFIG.heights.blade3,
+          baseWidth: 0.1,
+          tipWidth: 0.015,
+          curveStrength: 0.17,
+          rootRadius: 0.04,
+          rootColor: new THREE.Color(0x3e732e),
+          tipColor: new THREE.Color(0x7ec842),
+          gradientPower: 0.9,
+        };
+      case 'grass4':
+        return {
+          bladeCount: 4,
+          height: GRASS_CONFIG.heights.blade4,
+          baseWidth: 0.1,
+          tipWidth: 0.015,
+          curveStrength: 0.17,
+          rootRadius: 0.04,
+          rootColor: new THREE.Color(0x3e732e),
+          tipColor: new THREE.Color(0x7ec842),
+          gradientPower: 0.9,
+        };
+      case 'grass5':
+        return {
+          bladeCount: 5,
+          height: GRASS_CONFIG.heights.blade5,
+          baseWidth: 0.1,
+          tipWidth: 0.015,
+          curveStrength: 0.17,
+          rootRadius: 0.04,
+          rootColor: new THREE.Color(0x3e732e),
+          tipColor: new THREE.Color(0x7ec842),
+          gradientPower: 0.9,
+        };
+      case 'dryGrass':
+      default:
+        return {
+          bladeCount: 4,
+          height: GRASS_CONFIG.heights.dryGrass,
+          baseWidth: 0.05,
+          tipWidth: 0.01,
+          curveStrength: 0.16,
+          rootRadius: 0.03,
+          rootColor: new THREE.Color(0x9e8a52),
+          tipColor: new THREE.Color(0xded09b),
+          gradientPower: 1.1,
+        };
+    }
+  }
+
+  /**
+   * Упрощенный пучок: те же лезвия, тот же наклон верхушки, но один сегмент
+   * вместо трех (18 -> 6 треугольников для blade3). Силуэт пучка и покрытие
+   * земли не меняются, поэтому разница видна только вплотную.
+   */
+  private static createLowBladeGeometry(variant: FoliageVariant): THREE.BufferGeometry {
+    const p = GrassGeometryBuilder.bladeParamsFor(variant);
+    return GrassGeometryBuilder.generateBladeGeometry(
+      p.bladeCount,
+      1,
+      p.height,
+      p.baseWidth,
+      p.tipWidth,
+      p.curveStrength,
+      p.rootRadius,
+      p.rootColor,
+      p.tipColor,
+      p.gradientPower
+    );
+  }
+
   /** Высохшая / соломенная трава */
   public static createDryGrassGeometry(): THREE.BufferGeometry {
+    const p = GrassGeometryBuilder.bladeParamsFor('dryGrass');
     return GrassGeometryBuilder.generateBladeGeometry(
-      4,
+      p.bladeCount,
       3,
-      GRASS_CONFIG.heights.dryGrass,
-      0.05,
-      0.01,
-      0.16,
-      0.03,
-      new THREE.Color(0x9e8a52),
-      new THREE.Color(0xded09b),
-      1.1
+      p.height,
+      p.baseWidth,
+      p.tipWidth,
+      p.curveStrength,
+      p.rootRadius,
+      p.rootColor,
+      p.tipColor,
+      p.gradientPower
     );
   }
 
@@ -164,6 +280,120 @@ export class GrassGeometryBuilder {
           indices.push(r0 + s, r0 + next, r1 + s);
           indices.push(r0 + next, r1 + next, r1 + s);
         }
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geo.setIndex(indices);
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+    geo.userData.isSharedAsset = true;
+    return geo;
+  }
+
+  /**
+   * Пшеница дальнего LOD: стебель одним квадом + колосок граненой пирамидой
+   * (18 треугольников вместо 108). Золотой колосок и общий силуэт кустика
+   * сохраняются, поэтому пшеничное поле не превращается в зеленую кашу.
+   */
+  private static createLowWheatGeometry(): THREE.BufferGeometry {
+    const stalkCount = 3;
+    const baseHeight = GRASS_CONFIG.heights.wheat;
+    const earHeight = 0.28;
+    const earWidth = 0.052;
+
+    const stalkColorRoot = new THREE.Color(0xd4be58);
+    const stalkColorTip = new THREE.Color(0xf6d868);
+    const earColor = new THREE.Color(0xffe676);
+
+    const positions: number[] = [];
+    const normals: number[] = [];
+    const uvs: number[] = [];
+    const colors: number[] = [];
+    const indices: number[] = [];
+
+    for (let b = 0; b < stalkCount; b++) {
+      const angle = (b / stalkCount) * Math.PI * 2 + b * 0.4;
+      const rootDist = b === 0 ? 0.0 : 0.04;
+      const rootX = Math.cos(angle) * rootDist;
+      const rootZ = Math.sin(angle) * rootDist;
+
+      const leanX = Math.cos(angle) * (b === 0 ? 0.02 : 0.08);
+      const leanZ = Math.sin(angle) * (b === 0 ? 0.02 : 0.08);
+      const height = baseHeight * (0.9 + (b === 0 ? 0.15 : b * 0.05));
+      const stalkTopY = height - earHeight;
+
+      // 1. Стебель одним двусторонним квадом (полусферическая нормаль к небу)
+      const stalkHalfW = 0.015;
+      const perpX = -Math.sin(angle) * stalkHalfW;
+      const perpZ = Math.cos(angle) * stalkHalfW;
+      const nx = Math.cos(angle) * 0.35;
+      const nz = Math.sin(angle) * 0.35;
+
+      positions.push(
+        rootX - perpX,
+        0,
+        rootZ - perpZ,
+        rootX + perpX,
+        0,
+        rootZ + perpZ,
+        rootX + leanX - perpX,
+        stalkTopY,
+        rootZ + leanZ - perpZ,
+        rootX + leanX + perpX,
+        stalkTopY,
+        rootZ + leanZ + perpZ
+      );
+      for (let i = 0; i < 4; i++) normals.push(nx, 0.85, nz);
+      uvs.push(0, 0, 1, 0, 0, 0.65, 1, 0.65);
+      colors.push(
+        stalkColorRoot.r,
+        stalkColorRoot.g,
+        stalkColorRoot.b,
+        stalkColorRoot.r,
+        stalkColorRoot.g,
+        stalkColorRoot.b,
+        stalkColorTip.r,
+        stalkColorTip.g,
+        stalkColorTip.b,
+        stalkColorTip.r,
+        stalkColorTip.g,
+        stalkColorTip.b
+      );
+      const stalkIdx = positions.length / 3 - 4;
+      indices.push(stalkIdx, stalkIdx + 1, stalkIdx + 2);
+      indices.push(stalkIdx + 1, stalkIdx + 3, stalkIdx + 2);
+
+      // 2. Колосок — 4-гранная пирамида: 4 треугольника вместо 30 на граненый цилиндр
+      const earBaseY = stalkTopY;
+      const earR = earWidth * 0.7;
+      const earStartIdx = positions.length / 3;
+
+      for (let s = 0; s < 4; s++) {
+        const sa = (s / 4) * Math.PI * 2 + angle;
+        positions.push(
+          rootX + leanX + Math.cos(sa) * earR,
+          earBaseY,
+          rootZ + leanZ + Math.sin(sa) * earR
+        );
+        normals.push(Math.cos(sa) * 0.45, 0.8, Math.sin(sa) * 0.45);
+        uvs.push(0, 0.65);
+        colors.push(earColor.r, earColor.g, earColor.b);
+      }
+      // Вершина пирамиды (самая верхняя точка колоска)
+      positions.push(rootX + leanX * 1.05, earBaseY + earHeight, rootZ + leanZ * 1.05);
+      normals.push(0, 1, 0);
+      uvs.push(0.5, 1.0);
+      colors.push(earColor.r, earColor.g, earColor.b);
+      const apexIdx = positions.length / 3 - 1;
+
+      for (let s = 0; s < 4; s++) {
+        const next = (s + 1) % 4;
+        indices.push(earStartIdx + s, earStartIdx + next, apexIdx);
       }
     }
 
@@ -308,29 +538,252 @@ export class GrassGeometryBuilder {
     return geo;
   }
 
+  /**
+   * Камыш дальнего LOD: стебель одним квадом, два листа и початок-пирамида
+   * (10 треугольников вместо 62). Сохраняются и высота (1.45 м), и каштановый
+   * початок, и золотистое рыльце на макушке — силуэт узнаваем с любой дистанции.
+   */
+  private static createLowReedsGeometry(): THREE.BufferGeometry {
+    const height = GRASS_CONFIG.heights.reeds;
+    const headBaseY = height * 0.75;
+    const headHeight = 0.32;
+    const headRadius = 0.05;
+
+    const stalkColor = new THREE.Color(0x689f38);
+    const leafColor = new THREE.Color(0x7cb342);
+    const headColor = new THREE.Color(0x7d421e);
+    const tipSpikeColor = new THREE.Color(0xd4b85c);
+
+    const positions: number[] = [];
+    const normals: number[] = [];
+    const uvs: number[] = [];
+    const colors: number[] = [];
+    const indices: number[] = [];
+
+    // 1. Высокий стебель одним двусторонним квадом (макушка — золотистое рыльце)
+    const stalkHalfW = 0.02;
+    positions.push(
+      -stalkHalfW,
+      0,
+      0,
+      stalkHalfW,
+      0,
+      0,
+      -stalkHalfW,
+      height,
+      0,
+      stalkHalfW,
+      height,
+      0
+    );
+    for (let i = 0; i < 4; i++) normals.push(0, 0.85, 0.35);
+    uvs.push(0, 0, 1, 0, 0, 1, 1, 1);
+    colors.push(
+      stalkColor.r,
+      stalkColor.g,
+      stalkColor.b,
+      stalkColor.r,
+      stalkColor.g,
+      stalkColor.b,
+      tipSpikeColor.r,
+      tipSpikeColor.g,
+      tipSpikeColor.b,
+      tipSpikeColor.r,
+      tipSpikeColor.g,
+      tipSpikeColor.b
+    );
+    indices.push(0, 1, 2, 1, 3, 2);
+
+    // 2. Три ланцетных листа (по кваду на лист вместо четырех сегментов)
+    const leafCount = 3;
+    for (let l = 0; l < leafCount; l++) {
+      const lang = (l / leafCount) * Math.PI * 2 + 0.3;
+      const leafH = 0.9 + l * 0.15;
+      const dirX = Math.cos(lang);
+      const dirZ = Math.sin(lang);
+      const perpX = -dirZ * 0.035;
+      const perpZ = dirX * 0.035;
+      const baseIdx = positions.length / 3;
+
+      positions.push(
+        -perpX,
+        0,
+        -perpZ,
+        perpX,
+        0,
+        perpZ,
+        dirX * 0.14 - perpX * 0.3,
+        leafH,
+        dirZ * 0.14 - perpZ * 0.3,
+        dirX * 0.14 + perpX * 0.3,
+        leafH,
+        dirZ * 0.14 + perpZ * 0.3
+      );
+      for (let i = 0; i < 4; i++) normals.push(dirX * 0.4, 0.85, dirZ * 0.4);
+      uvs.push(0, 0, 1, 0, 0, 1, 1, 1);
+      for (let i = 0; i < 4; i++) colors.push(leafColor.r, leafColor.g, leafColor.b);
+      indices.push(baseIdx, baseIdx + 1, baseIdx + 2);
+      indices.push(baseIdx + 1, baseIdx + 3, baseIdx + 2);
+    }
+
+    // 3. Теплый коричневый початок — 4-гранная пирамида (силуэтный «карандаш»)
+    const headStartIdx = positions.length / 3;
+    for (let s = 0; s < 4; s++) {
+      const sa = (s / 4) * Math.PI * 2;
+      positions.push(Math.cos(sa) * headRadius * 0.7, headBaseY, Math.sin(sa) * headRadius * 0.7);
+      normals.push(Math.cos(sa) * 0.55, 0.75, Math.sin(sa) * 0.55);
+      uvs.push(0, 0.7);
+      colors.push(headColor.r, headColor.g, headColor.b);
+    }
+    positions.push(0, headBaseY + headHeight, 0);
+    normals.push(0, 0.9, 0);
+    uvs.push(0.5, 1.0);
+    colors.push(headColor.r, headColor.g, headColor.b);
+    const headApexIdx = positions.length / 3 - 1;
+    for (let s = 0; s < 4; s++) {
+      indices.push(headStartIdx + s, headStartIdx + ((s + 1) % 4), headApexIdx);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geo.setIndex(indices);
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+    geo.userData.isSharedAsset = true;
+    return geo;
+  }
+
+  /** Палитра и число лепестков вида цветка: общие для полной и упрощенной геометрии */
+  private static flowerStyle(type: FlowerType): {
+    petalColor: THREE.Color;
+    centerColor: THREE.Color;
+    petalCount: number;
+  } {
+    switch (type) {
+      case 'cornflower':
+        // небесно-васильковый
+        return {
+          petalColor: new THREE.Color(0x29b6f6),
+          centerColor: new THREE.Color(0x0d47a1),
+          petalCount: 6,
+        };
+      case 'daisy':
+        // белая ромашка
+        return {
+          petalColor: new THREE.Color(0xffffff),
+          centerColor: new THREE.Color(0xffca28),
+          petalCount: 8,
+        };
+      case 'dandelion':
+        // солнечный одуванчик
+        return {
+          petalColor: new THREE.Color(0xffd54f),
+          centerColor: new THREE.Color(0xffa000),
+          petalCount: 7,
+        };
+      case 'poppy':
+      default:
+        // алый мак
+        return {
+          petalColor: new THREE.Color(0xff3333),
+          centerColor: new THREE.Color(0x212121),
+          petalCount: 5,
+        };
+    }
+  }
+
+  /**
+   * Цветок дальнего LOD: стебель одним квадом + соцветие двумя горизонтальными
+   * кватами (лепестки снизу, сердцевина сверху) — 6 треугольников вместо ~32.
+   * На дальней дистанции соцветие занимает 2-4 пикселя, поэтому важен только
+   * цвет: именно он дает читаемую «горошину» конопляника/ромашки в общей массе.
+   */
+  private static createLowFlowerGeometry(type: FlowerType): THREE.BufferGeometry {
+    const stemHeight = GRASS_CONFIG.heights.flowers;
+    const flowerRadius = 0.11;
+    const stemColor = new THREE.Color(0x689f38);
+    const { petalColor, centerColor } = GrassGeometryBuilder.flowerStyle(type);
+
+    const positions: number[] = [];
+    const normals: number[] = [];
+    const uvs: number[] = [];
+    const colors: number[] = [];
+    const indices: number[] = [];
+
+    // 1. Стебель одним двусторонним квадом
+    const hw = 0.015;
+    positions.push(-hw, 0, 0, hw, 0, 0, -hw, stemHeight, 0, hw, stemHeight, 0);
+    for (let i = 0; i < 4; i++) normals.push(0, 0.88, 0.25);
+    uvs.push(0, 0, 1, 0, 0, 1, 1, 1);
+    for (let i = 0; i < 4; i++) colors.push(stemColor.r, stemColor.g, stemColor.b);
+    indices.push(0, 1, 2, 1, 3, 2);
+
+    // 2. Соцветие: лепестки и сердцевина двумя кватами, смотрящими строго в небо
+    const petalR = flowerRadius * 1.15;
+    const centerR = flowerRadius * 0.5;
+    const petalY = stemHeight + 0.018;
+    const centerY = stemHeight + 0.032;
+
+    positions.push(
+      -petalR,
+      petalY,
+      -petalR,
+      petalR,
+      petalY,
+      -petalR,
+      petalR,
+      petalY,
+      petalR,
+      -petalR,
+      petalY,
+      petalR
+    );
+    for (let i = 0; i < 4; i++) normals.push(0, 1, 0);
+    uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
+    for (let i = 0; i < 4; i++) colors.push(petalColor.r, petalColor.g, petalColor.b);
+    indices.push(4, 5, 6, 4, 6, 7);
+
+    positions.push(
+      -centerR,
+      centerY,
+      -centerR,
+      centerR,
+      centerY,
+      -centerR,
+      centerR,
+      centerY,
+      centerR,
+      -centerR,
+      centerY,
+      centerR
+    );
+    for (let i = 0; i < 4; i++) normals.push(0, 1, 0);
+    uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
+    for (let i = 0; i < 4; i++) colors.push(centerColor.r, centerColor.g, centerColor.b);
+    indices.push(8, 9, 10, 8, 10, 11);
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geo.setIndex(indices);
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+    geo.userData.isSharedAsset = true;
+    return geo;
+  }
+
   /** Полевые цветы: яркие насыщенные лепестки с верным зенитным освещением */
   public static createFlowerGeometry(type: FlowerType): THREE.BufferGeometry {
     const stemHeight = GRASS_CONFIG.heights.flowers;
     const flowerRadius = 0.11;
     const stemColor = new THREE.Color(0x689f38); // свежий салатово-зеленый
 
-    let petalColor = new THREE.Color(0xff3333); // алый мак
-    let centerColor = new THREE.Color(0x212121);
-    let petalCount = 5;
-
-    if (type === 'cornflower') {
-      petalColor = new THREE.Color(0x29b6f6); // небесно-васильковый
-      centerColor = new THREE.Color(0x0d47a1);
-      petalCount = 6;
-    } else if (type === 'daisy') {
-      petalColor = new THREE.Color(0xffffff); // белая ромашка
-      centerColor = new THREE.Color(0xffca28); // ярко-желтая серединка
-      petalCount = 8;
-    } else if (type === 'dandelion') {
-      petalColor = new THREE.Color(0xffd54f); // солнечный одуванчик
-      centerColor = new THREE.Color(0xffa000);
-      petalCount = 7;
-    }
+    const { petalColor, centerColor, petalCount } = GrassGeometryBuilder.flowerStyle(type);
 
     const positions: number[] = [];
     const normals: number[] = [];

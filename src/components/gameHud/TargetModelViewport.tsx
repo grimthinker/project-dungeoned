@@ -6,14 +6,13 @@ import { CREATURE_RIG_PROFILES } from '../../rendering/rigProfiles';
 import { BodyStructureType } from '../../ecs/templates';
 import { ProceduralCreatureAssetManager } from '../../rendering/creatures/ProceduralAssetManager';
 import { computeLocalBox, computeItemGrip } from '../../rendering/gripCalculators';
-import {
-  disposeObject,
-  attachOutlines,
-  createOutlineShaderMaterial,
-} from '../../rendering/renderUtils';
+import { disposeObject } from '../../rendering/renderUtils';
+import { OutlinePass } from '../../rendering/postprocessing/OutlinePass';
+import { CEL_OUTLINE_LAYER, attachOutlineObjectId } from '../../rendering/outlineMask';
 import { ToonMaterialManager } from '../../rendering/materials/ToonMaterialManager';
 import { IHudDataProvider } from './hudPorts';
 import { BALANCE_CONFIG } from '../../config/balanceConfig';
+import { VISUAL_CONFIG } from '../../config/visualConfig';
 
 export interface TargetModelViewportProps {
   app?: GameApp | null;
@@ -42,6 +41,7 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
   const targetCenterRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0.5, 0));
   const rafIdRef = useRef<number>(0);
   const socketItemsHashRef = useRef<string>('');
+  const outlinePassRef = useRef<OutlinePass | null>(null);
 
   // Сброс зума при переключении на новую цель
   useEffect(() => {
@@ -113,6 +113,10 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
         mixerRef.current = null;
       }
       disposeObject(modelGroup);
+      if (outlinePassRef.current) {
+        outlinePassRef.current.dispose();
+        outlinePassRef.current = null;
+      }
       renderer.dispose();
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
@@ -148,6 +152,10 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
 
           if (app?.celShading) {
             ToonMaterialManager.getInstance().applyToon(itemMesh);
+            // Слой cel-маски пост-процесс обводки (как в основной сцене)
+            itemMesh.traverse((c) => {
+              if (c instanceof THREE.Mesh) c.layers.enable(CEL_OUTLINE_LAYER);
+            });
           }
           socketBone.add(itemMesh);
         }
@@ -232,7 +240,12 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
         // Применяем стиль шейдинга из игры для единообразия картинки
         if (app?.celShading) {
           ToonMaterialManager.getInstance().applyToon(modelGroup);
-          attachOutlines(modelGroup, createOutlineShaderMaterial(0x151515, 1.8));
+          // Пост-процесс обводки: вся модель цели — кандидат cel-маски
+          modelGroup.traverse((child) => {
+            if (child instanceof THREE.Mesh) child.layers.enable(CEL_OUTLINE_LAYER);
+          });
+          // Один id на всю модель: контур идет по внешнему силуэту, а не по стыкам мешей
+          attachOutlineObjectId(modelGroup, 'hud-target-preview');
         }
 
         const box = computeLocalBox(modelGroup);
@@ -383,6 +396,26 @@ export const TargetModelViewport: React.FC<TargetModelViewportProps> = ({
         }
 
         rendererRef.current.render(sceneRef.current, cameraRef.current);
+
+        // Пост-процесс cel-обводки для превью цели (малый рендерер)
+        if (app?.celShading && outlinePassRef.current === null) {
+          outlinePassRef.current = new OutlinePass();
+        }
+        if (app?.celShading && outlinePassRef.current) {
+          const canvas = rendererRef.current.domElement;
+          outlinePassRef.current.render(
+            rendererRef.current,
+            sceneRef.current,
+            cameraRef.current,
+            canvas.width,
+            canvas.height,
+            {
+              cel: true,
+              select: false,
+              selectColor: VISUAL_CONFIG.selection.gameSelectedColor,
+            }
+          );
+        }
       }
 
       rafIdRef.current = requestAnimationFrame(animate);

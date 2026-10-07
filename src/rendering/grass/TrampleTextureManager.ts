@@ -17,6 +17,13 @@ export class TrampleTextureManager {
   private lastCenter = new THREE.Vector2(0, 0);
   private isFirstFrame: boolean = true;
 
+  /** Управление спящим режимом и фиксированной частотой симуляции (как у WaterRippleManager) */
+  private isSleeping: boolean = false;
+  private activityTimer: number = 0;
+  private simAccumulator: number = 0;
+  private readonly simFps: number = GRASS_CONFIG.trample.simFps;
+  private readonly idleSleepDelay: number = GRASS_CONFIG.trample.idleSleepDelay;
+
   private readTarget: THREE.WebGLRenderTarget;
   private writeTarget: THREE.WebGLRenderTarget;
   private simScene: THREE.Scene;
@@ -220,6 +227,37 @@ export class TrampleTextureManager {
     camX: number,
     camZ: number
   ): void {
+    const count = Math.min(32, stamps.length);
+
+    // 1. Спящий режим (Dormant Mode): после полного восстановления травы (idleSleepDelay
+    // без наступаний) симуляция очищается и полностью выключается до следующего шага
+    if (count > 0) {
+      this.activityTimer = this.idleSleepDelay;
+      this.isSleeping = false;
+    } else if (this.activityTimer > 0) {
+      this.activityTimer -= dt;
+    } else {
+      if (!this.isSleeping) {
+        this.clear(renderer);
+        this.isSleeping = true;
+      }
+      return; // Трава в покое: 0 проходов рендера GPU
+    }
+
+    // 2. Ограничение частоты симуляции (Fixed Simulation Rate, как у ряби), чтобы
+    // при 120fps экранах не считать один и тот же шаг по два раза в кадре
+    const targetSimInterval = 1.0 / this.simFps;
+    this.simAccumulator += dt;
+
+    if (this.simAccumulator < targetSimInterval) {
+      return; // Пропускаем тяжелый рендер, интерполяция/нейтральное состояние не меняются
+    }
+
+    this.simAccumulator = Math.min(
+      targetSimInterval * 2.0,
+      this.simAccumulator - targetSimInterval
+    );
+
     // Привязываем центр окна к дискретной сетке текселей для предотвращения размытия при скроллинге
     const texelSize = this.mapSize / this.resolution;
     const snappedX = Math.floor(camX / texelSize) * texelSize;
@@ -237,14 +275,13 @@ export class TrampleTextureManager {
     this.center.set(snappedX, snappedZ);
     this.lastCenter.set(snappedX, snappedZ);
 
-    this.simMaterial.uniforms.uDeltaTime.value = dt;
+    // Восстановление и скорость изгиба работают от фиксированного шага (не от FPS рендера)
+    this.simMaterial.uniforms.uDeltaTime.value = targetSimInterval;
     this.simMaterial.uniforms.uRecoveryTime.value = GRASS_CONFIG.trample.recoveryDuration;
     this.simMaterial.uniforms.uDelay.value = GRASS_CONFIG.trample.delay;
     this.simMaterial.uniforms.uBendSpeed.value = this.bendSpeed;
     this.simMaterial.uniforms.uMotionBias.value = this.motionBias;
     this.simMaterial.uniforms.tPrev.value = this.readTarget.texture;
-
-    const count = Math.min(32, stamps.length);
 
     for (let i = 0; i < 32; i++) {
       if (i < count) {

@@ -16,11 +16,12 @@ import {
   MeshAttachmentDesc,
 } from '../../rendering/creatures/CreatureMeshAssembler';
 import { RigSocketBinder } from '../../rendering/creatures/RigSocketBinder';
+import { disposeObject } from '../../rendering/renderUtils';
 import {
-  disposeObject,
-  attachOutlines,
-  createOutlineShaderMaterial,
-} from '../../rendering/renderUtils';
+  CEL_OUTLINE_LAYER,
+  SELECT_OUTLINE_LAYER,
+  attachOutlineObjectId,
+} from '../../rendering/outlineMask';
 import { AttackVisualsManager } from '../../rendering/attacks/AttackVisualsManager';
 import { GrassSyncSystem } from '../../rendering/grass/GrassSyncSystem';
 import { BALANCE_CONFIG } from '../../config/balanceConfig';
@@ -37,7 +38,6 @@ import { Vec3 } from '../../types';
 import { getEffectiveLogicBrain } from '../utils/anatomy';
 import { AIDebugDTO, EntityOverlayDTO, ItemTooltipDTO } from '../../rendering/IRenderer';
 import { TrampleStamp } from '../../rendering/grass/TrampleTextureManager';
-import { VISUAL_CONFIG } from '../../config/visualConfig';
 
 const PROCEDURAL_PROP_SCALES: Record<
   string,
@@ -86,7 +86,6 @@ const PROCEDURAL_PROP_SCALES: Record<
 
 export class ThreeSyncSystem {
   public static disposeObject = disposeObject;
-  public static attachOutlines = attachOutlines;
 
   private scene: THREE.Scene;
   private renderer?: THREE.WebGLRenderer;
@@ -106,6 +105,18 @@ export class ThreeSyncSystem {
   private grassSync: GrassSyncSystem;
   private toonManager = ToonMaterialManager.getInstance();
   private isCelShading: boolean = false;
+
+  // Пост-процесс обводок: дифф выделения прошлого кадра для включения/выключения слоя SELECT
+  private _lastSelectedIds = new Set<EntityId>();
+  private _lastSelectedIdsValid = false;
+
+  // Scratch-объекты освещения воды: общий расчет один раз на кадр (без аллокаций на водоём)
+  private _waterLightingReady = false;
+  private _waterSunDir = new THREE.Vector3();
+  private _waterSunColor = new THREE.Color(0, 0, 0);
+  private _waterAmbient = new THREE.Color(0.25, 0.3, 0.4);
+  private _dirScratch = new THREE.Vector3();
+  private _colScratch = new THREE.Color();
 
   // Кэшированные материалы для производительности (фоллбэк)
   private matPlayer = new THREE.MeshLambertMaterial({ color: 0x2980b9 });
@@ -180,15 +191,6 @@ export class ThreeSyncSystem {
     depthWrite: false,
   });
   private matSelection = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
-  private matSilhouetteOutline = createOutlineShaderMaterial(
-    VISUAL_CONFIG.selection.editorSelectedColor,
-    3.2
-  );
-  private matGameSilhouetteOutline = createOutlineShaderMaterial(
-    VISUAL_CONFIG.selection.gameSelectedColor,
-    3.2
-  );
-  private matCelOutline = createOutlineShaderMaterial(0x151515, 2.0);
 
   constructor(scene: THREE.Scene, renderer?: THREE.WebGLRenderer) {
     this.scene = scene;
@@ -197,7 +199,6 @@ export class ThreeSyncSystem {
     this.terrainSync = new TerrainSyncSystem();
     this.creatureAssembler = new CreatureMeshAssembler(
       scene,
-      this.matSilhouetteOutline,
       this.loadingMeshes,
       this.loadingGenerations,
       (id, state) => this.animators.set(id, state),
@@ -282,11 +283,91 @@ export class ThreeSyncSystem {
     this.matZoneSlow.dispose();
     this.matZoneFast.dispose();
     this.matSelection.dispose();
-    this.matSilhouetteOutline.dispose();
-    this.matCelOutline.dispose();
   }
 
   private currentWorld: World | null = null;
+
+  /**
+   * Включить/выключить слой маски обводки на всех мешах объекта.
+   * Применяется к готовому объекту, поэтому корректно работает и с асинхронно
+   * загруженными детьми (GLTF, модульный риг).
+   */
+  private static setMeshLayer(obj: THREE.Object3D, layer: number, enabled: boolean): void {
+    obj.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        if (enabled) child.layers.enable(layer);
+        else child.layers.disable(layer);
+      }
+    });
+  }
+
+  /**
+   * Кандидат на cel-обводку (черный контур): все существа, предметы, части тел,
+   * снаряды и ВСЕ препятствия — камни, дома, деревья. Контур дает читаемый силуэт
+   * и служит Depth-зависимым перекрытием в маске: сквозь такой объект контур
+   * заднего не просвечивает, а сами препятствия видны с любой стороны.
+   */
+  private isOutlineEligible(archetype: string | undefined): boolean {
+    return (
+      archetype === 'creature' ||
+      archetype === 'item' ||
+      archetype === 'bodyPart' ||
+      archetype === 'projectile' ||
+      archetype === 'obstacle'
+    );
+  }
+
+  /** Применение слоев cel-кандидата и выделения к готовому объекту */
+  private applyEntityOutlineLayers(
+    obj: THREE.Object3D,
+    id: EntityId,
+    archetype: string | undefined
+  ): void {
+    ThreeSyncSystem.setMeshLayer(obj, CEL_OUTLINE_LAYER, this.isOutlineEligible(archetype));
+    ThreeSyncSystem.setMeshLayer(obj, SELECT_OUTLINE_LAYER, this._lastSelectedIds.has(id));
+    // Идентификатор сущности: контур проходит и по границе с другими объектами
+    attachOutlineObjectId(obj, id);
+  }
+
+  /**
+   * Общий расчет освещения сцены для всех водоемов (один раз на кадр).
+   * Плавное взвешивание направленных источников по яркости при закате/восходе,
+   * рассеянный свет берется из Hemisphere/Ambient света.
+   */
+  private computeWaterLighting(): void {
+    const sunDir = this._waterSunDir;
+    const sunColor = this._waterSunColor;
+    const ambientColor = this._waterAmbient;
+    sunDir.set(0, 0, 0);
+    sunColor.setRGB(0, 0, 0);
+    ambientColor.setRGB(0.25, 0.3, 0.4);
+    let totalDirectionalWeight = 0;
+
+    for (let i = 0; i < this.scene.children.length; i++) {
+      const child = this.scene.children[i];
+      if (child instanceof THREE.DirectionalLight && child.intensity > 0) {
+        const lum =
+          child.intensity * (child.color.r * 0.299 + child.color.g * 0.587 + child.color.b * 0.114);
+        if (lum > 0.0001) {
+          const dir = this._dirScratch.copy(child.position).sub(child.target.position).normalize();
+          sunDir.addScaledVector(dir, lum);
+          sunColor.add(this._colScratch.copy(child.color).multiplyScalar(child.intensity));
+          totalDirectionalWeight += lum;
+        }
+      } else if (child instanceof THREE.HemisphereLight) {
+        ambientColor.copy(child.color).multiplyScalar(child.intensity);
+      } else if (child instanceof THREE.AmbientLight) {
+        ambientColor.copy(child.color).multiplyScalar(child.intensity);
+      }
+    }
+
+    if (totalDirectionalWeight > 0.0001) {
+      sunDir.normalize();
+    } else {
+      sunDir.set(0.5, 0.8, 0.3).normalize();
+      sunColor.setRGB(1.0, 0.95, 0.85);
+    }
+  }
 
   public update(
     dt: number,
@@ -300,6 +381,8 @@ export class ThreeSyncSystem {
     fixedDt: number = 1 / 60
   ): void {
     this.currentWorld = world;
+    // Освещение воды пересчитывается заново в этом кадре (при наличии водоемов)
+    this._waterLightingReady = false;
     if (celShading !== this.isCelShading) {
       this.isCelShading = celShading;
       for (const [, obj] of this.meshes.entries()) {
@@ -312,6 +395,25 @@ export class ThreeSyncSystem {
         }
       }
     }
+
+    // Синхронизация слоя выделения (пост-процесс обводки): дифф с прошлым кадром
+    // дешевле полного прохода по всем мешам — traverse выполняется только при изменении набора
+    for (const id of selectedIds) {
+      if (!this._lastSelectedIdsValid || !this._lastSelectedIds.has(id)) {
+        const obj = this.meshes.get(id);
+        if (obj) ThreeSyncSystem.setMeshLayer(obj, SELECT_OUTLINE_LAYER, true);
+      }
+    }
+    if (this._lastSelectedIdsValid) {
+      for (const id of this._lastSelectedIds) {
+        if (!selectedIds.has(id)) {
+          const obj = this.meshes.get(id);
+          if (obj) ThreeSyncSystem.setMeshLayer(obj, SELECT_OUTLINE_LAYER, false);
+        }
+      }
+    }
+    this._lastSelectedIds = new Set(selectedIds);
+    this._lastSelectedIdsValid = true;
 
     const activeIds = new Set<EntityId>();
     const renderables = world.getEntitiesWith('transform', 'renderable');
@@ -608,40 +710,14 @@ export class ThreeSyncSystem {
               );
             }
 
-            // 3. Получение параметров освещения сцены с плавным взвешиванием при закате/восходе
-            const sunDir = new THREE.Vector3();
-            const sunColor = new THREE.Color(0, 0, 0);
-            const ambientColor = new THREE.Color(0.25, 0.3, 0.4);
-            let totalDirectionalWeight = 0;
-
-            for (let i = 0; i < this.scene.children.length; i++) {
-              const child = this.scene.children[i];
-              if (child instanceof THREE.DirectionalLight && child.intensity > 0) {
-                const lum =
-                  child.intensity *
-                  (child.color.r * 0.299 + child.color.g * 0.587 + child.color.b * 0.114);
-                if (lum > 0.0001) {
-                  const dir = new THREE.Vector3()
-                    .copy(child.position)
-                    .sub(child.target.position)
-                    .normalize();
-                  sunDir.addScaledVector(dir, lum);
-                  sunColor.add(new THREE.Color().copy(child.color).multiplyScalar(child.intensity));
-                  totalDirectionalWeight += lum;
-                }
-              } else if (child instanceof THREE.HemisphereLight) {
-                ambientColor.copy(child.color).multiplyScalar(child.intensity);
-              } else if (child instanceof THREE.AmbientLight) {
-                ambientColor.copy(child.color).multiplyScalar(child.intensity);
-              }
+            // 3. Параметры освещения считаются один раз на кадр для всех водоемов
+            if (!this._waterLightingReady) {
+              this.computeWaterLighting();
+              this._waterLightingReady = true;
             }
-
-            if (totalDirectionalWeight > 0.0001) {
-              sunDir.normalize();
-            } else {
-              sunDir.set(0.5, 0.8, 0.3).normalize();
-              sunColor.setRGB(1.0, 0.95, 0.85);
-            }
+            const sunDir = this._waterSunDir;
+            const sunColor = this._waterSunColor;
+            const ambientColor = this._waterAmbient;
 
             // 4. Синхронизация юниформов шейдера
             const rippleTex = rippleManager ? rippleManager.getTexture() : null;
@@ -668,6 +744,14 @@ export class ThreeSyncSystem {
                 }
                 if (u.uRippleSize && rippleManager) {
                   u.uRippleSize.value = rippleManager.simSize;
+                }
+
+                // Переключатели тяжелых эффектов (низкий пресет) — живые значения из конфига
+                if (u.uFxDepth) {
+                  u.uFxDepth.value = GRAPHICS_CONFIG.water.fx.depth ? 1.0 : 0.0;
+                }
+                if (u.uFxCaustics) {
+                  u.uFxCaustics.value = GRAPHICS_CONFIG.water.fx.caustics ? 1.0 : 0.0;
                 }
 
                 // Передача параметров света
@@ -706,33 +790,14 @@ export class ThreeSyncSystem {
           }
         }
 
-        const isSelected = selectedIds.has(id);
+        // Слои cel-обводки (пост-процесс): кандидатность считается дешево каждый кадр,
+        // а traverse по мешам выполняется только при изменении состояния (создание/смена архетипа)
+        const isOutlineCandidate = this.isOutlineEligible(archetype);
 
-        // Оптимизация: Рисуем тяжелую обводку Cel Shading только для динамических и важных объектов.
-        // Статичное окружение (деревья, скалы) получит мультяшный свет, но сэкономит 50% Draw Calls.
-        const meta = world.getComponent(id, 'meta');
-        const isDynamicOrImportant =
-          archetype === 'creature' ||
-          archetype === 'item' ||
-          archetype === 'bodyPart' ||
-          (archetype === 'obstacle' && meta?.destructible === true);
-
-        obj.traverse((child) => {
-          if (child instanceof THREE.Mesh && child.userData.isSelectionOutline) {
-            if (isSelected) {
-              child.material =
-                _gameMode === GameMode.GAME
-                  ? this.matGameSilhouetteOutline
-                  : this.matSilhouetteOutline;
-              child.visible = true;
-            } else if (this.isCelShading && isDynamicOrImportant) {
-              child.material = this.matCelOutline;
-              child.visible = true;
-            } else {
-              child.visible = false;
-            }
-          }
-        });
+        if (isOutlineCandidate !== (obj.userData.celOutlineEligible === true)) {
+          obj.userData.celOutlineEligible = isOutlineCandidate;
+          ThreeSyncSystem.setMeshLayer(obj, CEL_OUTLINE_LAYER, isOutlineCandidate);
+        }
 
         // 3. Управление анимацией и ригом модульного существа
         if (obj.userData.isModularRig) {
@@ -869,9 +934,7 @@ export class ThreeSyncSystem {
             } else {
               obj.visible = true;
               const mat = this.getZoneMaterial(world, id);
-              const mainMesh = obj.children.find(
-                (c) => c instanceof THREE.Mesh && !c.userData.isSelectionOutline
-              ) as THREE.Mesh;
+              const mainMesh = obj.children.find((c) => c instanceof THREE.Mesh) as THREE.Mesh;
               if (mainMesh && mainMesh.material !== mat) mainMesh.material = mat;
             }
           } else if (archetype === 'obstacle') {
@@ -1355,7 +1418,8 @@ export class ThreeSyncSystem {
               group.userData.gripTransform = computeItemGrip(group, itemComp?.type);
             }
 
-            ThreeSyncSystem.attachOutlines(group, this.matSilhouetteOutline);
+            // Пост-процесс обводок: слои cel-кандидата и выделения (после добавления детей)
+            this.applyEntityOutlineLayers(group, id, archetype);
           }
         })
         .catch(console.error)
@@ -1503,7 +1567,8 @@ export class ThreeSyncSystem {
         group.userData.gripTransform = computeItemGrip(group, itemComp?.type);
       }
 
-      ThreeSyncSystem.attachOutlines(group, this.matSilhouetteOutline);
+      // Пост-процесс обводок: слои cel-кандидата и выделения
+      this.applyEntityOutlineLayers(group, id, archetype);
 
       return group;
     }
@@ -1692,7 +1757,7 @@ export class ThreeSyncSystem {
     let oldMesh: THREE.Mesh | null = null;
     for (let i = group.children.length - 1; i >= 0; i--) {
       const child = group.children[i];
-      if (child instanceof THREE.Mesh && !child.userData.isSelectionOutline) {
+      if (child instanceof THREE.Mesh) {
         oldMesh = child;
         group.remove(child);
         break;
@@ -1724,7 +1789,13 @@ export class ThreeSyncSystem {
     newMesh.userData.isSharedMaterial = true;
 
     group.add(newMesh);
-    ThreeSyncSystem.attachOutlines(group, this.matSilhouetteOutline);
+
+    // Пост-процесс обводок: зона не кандидат cel-обводки, но может быть выделена
+    ThreeSyncSystem.setMeshLayer(
+      newMesh,
+      SELECT_OUTLINE_LAYER,
+      this._lastSelectedIds.has(entityId)
+    );
     group.userData.currentShapeType = shape.shapeType;
   }
 }

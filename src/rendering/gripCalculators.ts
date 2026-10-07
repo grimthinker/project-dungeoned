@@ -14,7 +14,7 @@ export function computeLocalBox(rootObject: THREE.Object3D): THREE.Box3 {
   rootObject.updateMatrix();
 
   rootObject.traverse((child) => {
-    if (child instanceof THREE.Mesh && child.visible && !child.userData.isSelectionOutline) {
+    if (child instanceof THREE.Mesh && child.visible) {
       if (child.geometry) {
         if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
         if (child.geometry.boundingBox) {

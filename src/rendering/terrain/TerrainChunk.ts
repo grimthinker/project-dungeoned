@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { TERRAIN_CONFIG } from '../../config/terrainConfig';
+import { OUTLINE_OCCLUDER_LAYER } from '../outlineMask';
 
 export class TerrainChunk {
   public mesh: THREE.Mesh;
@@ -47,6 +48,9 @@ export class TerrainChunk {
     this.mesh.receiveShadow = true;
     this.mesh.userData.isTerrainMesh = true;
     this.mesh.userData.chunkId = id;
+
+    // Рельеф перекрывает контуры в пост-процессе обводок, но сам контур не получает
+    this.mesh.layers.enable(OUTLINE_OCCLUDER_LAYER);
   }
 
   public syncGeometry(heights: Float32Array, globalRes: number, globalWidth: number): void {

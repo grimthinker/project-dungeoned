@@ -76,7 +76,6 @@ export class ToonMaterialManager {
     root.traverse((child) => {
       if (
         child instanceof THREE.Mesh &&
-        !child.userData.isSelectionOutline &&
         !child.userData.isSkyDome &&
         !child.userData.isTerrainMesh &&
         !child.userData.isTerrainSkirt &&

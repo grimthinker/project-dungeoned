@@ -59,6 +59,8 @@ export interface RenderContext {
   environment?: EnvironmentData;
   showFPSMonitor?: boolean;
   fpsStats?: FPSStats;
+  /** Включена ли cel-shading обводка (пост-процесс маски кандидатов) */
+  celShading?: boolean;
 }
 
 export interface IRenderer {

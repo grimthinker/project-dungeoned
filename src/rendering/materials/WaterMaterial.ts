@@ -51,6 +51,9 @@ export function createWaterMaterial(
       uHasRipples: { value: 0.0 },
       uRippleCenter: { value: new THREE.Vector2(0, 0) },
       uRippleSize: { value: 48.0 },
+      // Переключатели тяжелых эффектов (низкий пресет): управляются из GRAPHICS_CONFIG.water.fx
+      uFxDepth: { value: GRAPHICS_CONFIG.water.fx.depth ? 1.0 : 0.0 },
+      uFxCaustics: { value: GRAPHICS_CONFIG.water.fx.caustics ? 1.0 : 0.0 },
       // Освещение
       uSunDirection: { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() },
       uSunColor: { value: new THREE.Color(1.0, 0.95, 0.85) },
@@ -60,6 +63,10 @@ export function createWaterMaterial(
       uCameraNear: { value: 0.1 },
       uCameraFar: { value: 1000.0 },
       uResolution: { value: new THREE.Vector2(1, 1) },
+      // Размер одного текселя таргета глубины в UV: нужен для ручной билинейной
+      // выборки, потому что depth-текстуры в GLES3 не поддерживают аппаратный
+      // LINEAR-фильтр (формат не filterable — текстура становится неполной).
+      uDepthTexel: { value: new THREE.Vector2(1.0 / rippleRes, 1.0 / rippleRes) },
     },
   ]);
 
@@ -160,6 +167,7 @@ export function createWaterMaterial(
       uniform float uCameraNear;
       uniform float uCameraFar;
       uniform vec2 uResolution;
+      uniform vec2 uDepthTexel;
 
       uniform sampler2D tRipple;
       uniform vec2 uRippleTexel;
@@ -168,14 +176,40 @@ export function createWaterMaterial(
       uniform vec2 uRippleCenter;
       uniform float uRippleSize;
 
+      // Переключатели тяжелых эффектов (низкий пресет качества): 1 — включено, 0 — выключено
+      uniform float uFxDepth;
+      uniform float uFxCaustics;
+
       varying vec2 vUv;
       varying vec3 vWorldPosition;
       varying vec3 vNormal;
       varying float vWaveHeight;
 
-      float readLinearDepth(sampler2D depthSampler, vec2 coord) {
-        float rawDepth = texture2D(depthSampler, coord).r;
+      float linearizeDepth(float rawDepth) {
         return (uCameraNear * uCameraFar) / (uCameraFar - rawDepth * (uCameraFar - uCameraNear));
+      }
+
+      /**
+       * Билинейная выборка сырой глубины по 4 соседним текселям.
+       *
+       * Таргет глубины вчетверо меньше кадра, а depth-текстуры в GLES3 не
+       * поддерживают аппаратный билинейный фильтр (формат не filterable, текстура
+       * становится неполной и читается как нулевая). Поэтому интерполяцию делаем
+       * вручную: одна выборка давала бы блоки 4x4 пикселя и лесенку на границе
+       * пены, четыре — гладкий градиент. Стоимость: 3 доп. выборки из крошечной
+       * текстуры, сдвинутые индексы лежат рядом и почти всегда в кэше.
+       */
+      float readDepthBilinear(vec2 coord, vec2 texel) {
+        vec2 base = coord / texel - 0.5;
+        vec2 f = fract(base);
+        vec2 idx = (floor(base) + 0.5) * texel;
+
+        float d00 = texture2D(tDepth, idx).r;
+        float d10 = texture2D(tDepth, idx + vec2(texel.x, 0.0)).r;
+        float d01 = texture2D(tDepth, idx + vec2(0.0, texel.y)).r;
+        float d11 = texture2D(tDepth, idx + texel).r;
+
+        return mix(mix(d00, d10, f.x), mix(d01, d11, f.x), f.y);
       }
 
       float getLinearDepthFromFragCoord(float fragCoordZ) {
@@ -185,9 +219,16 @@ export function createWaterMaterial(
       void main() {
         // --- 1. РАСЧЕТ ТОЛЩИНЫ ВОДЫ (DEPTH) И ПОГЛОЩЕНИЯ СВЕТА ---
         float waterDepth = 2.0;
-        if (uResolution.x > 10.0) {
-          vec2 screenUv = gl_FragCoord.xy / uResolution;
-          float sceneDepth = readLinearDepth(tDepth, screenUv);
+        if (uFxDepth > 0.5 && uResolution.x > 10.0) {
+          // uResolution — размер ИТОГОВОГО кадра: gl_FragCoord находится в его
+          // пикселях. Таргет глубины имеет меньшее разрешение, но нормированные
+          // UV у него те же, поэтому приведение к [0,1] обязательно.
+          // Clamp защищает от выхода за границы при любой потере синхронизации.
+          vec2 screenUv = clamp(gl_FragCoord.xy / uResolution, 0.0, 1.0);
+          // Половинный текель с каждой стороны: билинейная выборка должна
+          // покрывать в том числе рамку кадра, иначе край лодочки будет грубым.
+          vec2 texel = max(uDepthTexel * 0.5, vec2(1e-6));
+          float sceneDepth = linearizeDepth(readDepthBilinear(screenUv, texel));
           float surfaceDepth = getLinearDepthFromFragCoord(gl_FragCoord.z);
           waterDepth = max(0.0, sceneDepth - surfaceDepth);
         }
@@ -211,14 +252,37 @@ export function createWaterMaterial(
         vec2 p = (vWorldPosition.xz + flowOffset) * 0.8; 
         float t = uTime * 0.6;
 
-        float wave1 = sin(p.x + t) * cos(p.y - t);
-        float wave2 = sin(p.x * 0.7 - p.y * 1.3 + t * 1.2) * cos(p.y * 0.8 + p.x * 1.1 - t * 0.9);
-        float wave3 = sin(p.x * 1.5 + p.y * 0.5 - t * 1.4) * cos(p.y * 1.2 - p.x * 0.6 + t * 1.1);
-        float ripple = wave1 + wave2 + wave3;
-        float highlights = smoothstep(1.0, 1.8, abs(ripple));
-
-        float waveFoam = highlights * smoothstep(-0.02, 0.05, vWaveHeight);
+        // Пена на гребнях аналитических волн (в обычном пресете); в низком — отключается
+        float waveFoam = 0.0;
         float shoreFoam = smoothstep(${GRAPHICS_CONFIG.water.shoreFoamDistance.toFixed(2)}, 0.02, waterDepth);
+
+        /**
+         * Сглаживание кромки пены по экранной производной толщины воды.
+         *
+         * Полоса пены у́же пикселя на большом удалении, поэтому резкий
+         * smoothstep дает лесенку. Ширину перехода расширяем на
+         * величину изменения waterDepth за пиксель (fwidth): на большой
+         * дистанции кромка автоматически размывается в мягкий градиент,
+         * а вблизи остается резкой. Ноль стоит — пара ALU-операций, новых
+         * выборок текстур нет.
+         */
+        float foamEdge = fwidth(waterDepth);
+        if (foamEdge > 1e-4) {
+          shoreFoam = smoothstep(
+            ${GRAPHICS_CONFIG.water.shoreFoamDistance.toFixed(2)} + foamEdge,
+            0.02 - foamEdge,
+            waterDepth
+          );
+        }
+
+        if (uFxCaustics > 0.5) {
+          float wave1 = sin(p.x + t) * cos(p.y - t);
+          float wave2 = sin(p.x * 0.7 - p.y * 1.3 + t * 1.2) * cos(p.y * 0.8 + p.x * 1.1 - t * 0.9);
+          float wave3 = sin(p.x * 1.5 + p.y * 0.5 - t * 1.4) * cos(p.y * 1.2 - p.x * 0.6 + t * 1.1);
+          float ripple = wave1 + wave2 + wave3;
+          float highlights = smoothstep(1.0, 1.8, abs(ripple));
+          waveFoam = highlights * smoothstep(-0.02, 0.05, vWaveHeight);
+        }
 
         // Расчет нормалей и пены от интерактивной ряби (только при активных волнах)
         vec3 rippleNormal = vec3(0.0);
@@ -248,20 +312,23 @@ export function createWaterMaterial(
         }
 
         // Аналитические нормали для фоновых волн (расчет во фрагментном шейдере для детализации)
-        vec2 pWave = vWorldPosition.xz * 0.4 + flowOffset;
-        float dw1_dx = 1.2 * cos(pWave.x * 1.2 + uTime * uWaveSpeed) * cos(pWave.y * 1.1 + uTime * uWaveSpeed * 0.8);
-        float dw1_dz = -1.1 * sin(pWave.x * 1.2 + uTime * uWaveSpeed) * sin(pWave.y * 1.1 + uTime * uWaveSpeed * 0.8);
+        vec3 proceduralNormal = vec3(0.0);
+        if (uFxCaustics > 0.5) {
+          vec2 pWave = vWorldPosition.xz * 0.4 + flowOffset;
+          float dw1_dx = 1.2 * cos(pWave.x * 1.2 + uTime * uWaveSpeed) * cos(pWave.y * 1.1 + uTime * uWaveSpeed * 0.8);
+          float dw1_dz = -1.1 * sin(pWave.x * 1.2 + uTime * uWaveSpeed) * sin(pWave.y * 1.1 + uTime * uWaveSpeed * 0.8);
 
-        float dw2_dx = 0.8 * cos(pWave.x * 0.8 - pWave.y * 1.3 + uTime * uWaveSpeed * 1.1) * 0.6;
-        float dw2_dz = -1.3 * cos(pWave.x * 0.8 - pWave.y * 1.3 + uTime * uWaveSpeed * 1.1) * 0.6;
+          float dw2_dx = 0.8 * cos(pWave.x * 0.8 - pWave.y * 1.3 + uTime * uWaveSpeed * 1.1) * 0.6;
+          float dw2_dz = -1.3 * cos(pWave.x * 0.8 - pWave.y * 1.3 + uTime * uWaveSpeed * 1.1) * 0.6;
 
-        float dw3_dx = -1.5 * sin(pWave.x * 1.5 + pWave.y * 0.7 - uTime * uWaveSpeed * 0.9) * 0.4;
-        float dw3_dz = -0.7 * sin(pWave.x * 1.5 + pWave.y * 0.7 - uTime * uWaveSpeed * 0.9) * 0.4;
+          float dw3_dx = -1.5 * sin(pWave.x * 1.5 + pWave.y * 0.7 - uTime * uWaveSpeed * 0.9) * 0.4;
+          float dw3_dz = -0.7 * sin(pWave.x * 1.5 + pWave.y * 0.7 - uTime * uWaveSpeed * 0.9) * 0.4;
 
-        float dH_dx = (dw1_dx + dw2_dx + dw3_dx) * (uWaveHeight * 0.6 * 0.4);
-        float dH_dz = (dw1_dz + dw2_dz + dw3_dz) * (uWaveHeight * 0.6 * 0.4);
+          float dH_dx = (dw1_dx + dw2_dx + dw3_dx) * (uWaveHeight * 0.6 * 0.4);
+          float dH_dz = (dw1_dz + dw2_dz + dw3_dz) * (uWaveHeight * 0.6 * 0.4);
 
-        vec3 proceduralNormal = vec3(-dH_dx, 0.0, -dH_dz);
+          proceduralNormal = vec3(-dH_dx, 0.0, -dH_dz);
+        }
 
         float totalFoam = clamp((max(waveFoam, shoreFoam * 0.85) + wakeFoam * 0.5) * uFoamIntensity, 0.0, 0.85);
         // Мягкое смешивание цвета пены без аддитивного пересвета
@@ -300,6 +367,6 @@ export function createWaterMaterial(
   });
 
   material.userData.isSharedMaterial = true;
-  material.customProgramCacheKey = () => 'WaterShaderMaterial_v9';
+  material.customProgramCacheKey = () => 'WaterShaderMaterial_v11';
   return material;
 }

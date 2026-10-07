@@ -3,7 +3,8 @@ import { BodyStructureType } from '../../types';
 import { CREATURE_RIG_PROFILES } from '../rigProfiles';
 import { AssetManager } from '../AssetManager';
 import { computeLocalBox, computeDetachedLimbGrip } from '../gripCalculators';
-import { attachOutlines, disposeObject } from '../renderUtils';
+import { disposeObject } from '../renderUtils';
+import { CEL_OUTLINE_LAYER, attachOutlineObjectId } from '../outlineMask';
 
 export interface RigAnimatorState {
   mixer: THREE.AnimationMixer;
@@ -34,7 +35,6 @@ export interface DetachedLimbDesc {
 export class CreatureMeshAssembler {
   constructor(
     private scene: THREE.Scene,
-    private matSilhouetteOutline: THREE.Material,
     private loadingMeshes: Set<string>,
     private loadingGenerations: Map<string, number>,
     private onRegisterAnimator: (id: string, state: RigAnimatorState) => void,
@@ -149,7 +149,8 @@ export class CreatureMeshAssembler {
         }
       }
 
-      attachOutlines(parentGroup, this.matSilhouetteOutline);
+      // Пост-процесс обводок: существо всегда кандидат cel-обводки (слой маски)
+      this.enableCelOutlineLayer(parentGroup, rootId);
 
       const box = computeLocalBox(rig);
       const visualCorrectionY = -box.min.y;
@@ -252,7 +253,8 @@ export class CreatureMeshAssembler {
         desc.rootPartSubType
       );
 
-      attachOutlines(parentGroup, this.matSilhouetteOutline);
+      // Пост-процесс обводок: отсоединенная конечность всегда кандидат cel-обводки
+      this.enableCelOutlineLayer(parentGroup, rootId);
     } catch (err) {
       console.error(`[CreatureMeshAssembler] Error assembling detached limb ${rootId}:`, err);
     } finally {
@@ -260,5 +262,19 @@ export class CreatureMeshAssembler {
         this.loadingMeshes.delete(rootId);
       }
     }
+  }
+
+  /**
+   * Включает слой cel-маски обводки на всех мешах собранного объекта (существа/конечности)
+   * и привязывает идентификатор сущности: контур должен идти по внешнему силуэту рига,
+   * а не по стыкам отдельных мешей внутри него.
+   */
+  private enableCelOutlineLayer(obj: THREE.Object3D, entityId: string): void {
+    obj.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.layers.enable(CEL_OUTLINE_LAYER);
+      }
+    });
+    attachOutlineObjectId(obj, entityId);
   }
 }

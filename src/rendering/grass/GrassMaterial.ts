@@ -6,44 +6,37 @@ export interface GrassMaterialUniforms {
   uWindSpeed: { value: number };
   uWindStrength: { value: number };
   uTrampleMap: { value: THREE.Texture | null };
-  uTerrainSize: { value: THREE.Vector2 };
+  uTrampleCenter: { value: THREE.Vector2 };
+  uTrampleSize: { value: number };
   uCameraPos: { value: THREE.Vector3 };
   uFadeStart: { value: number };
   uFadeEnd: { value: number };
 }
 
-export function createGrassMaterial(): THREE.MeshStandardMaterial {
+/**
+ * Набор uniform-ов травы. Один и тот же объект-хранилище переиспользуется основным
+ * материалом и его дешёвым depth-вариантом, поэтому обновления (ветер, приминание,
+ * позиция камеры) достаточно применять один раз в кадр — оба шейдера их видят.
+ */
+export function createGrassUniforms(): GrassMaterialUniforms {
   const defaultTrampleTexture = new THREE.DataTexture(new Uint8Array([0, 128, 128, 255]), 1, 1);
   defaultTrampleTexture.needsUpdate = true;
 
-  const material = new THREE.MeshStandardMaterial({
-    roughness: 0.75,
-    metalness: 0.05,
-    side: THREE.DoubleSide,
-    vertexColors: true,
-  });
-
-  material.defines = {
-    USE_UV: '',
+  return {
+    uTime: { value: 0 },
+    uWindSpeed: { value: 1.8 },
+    uWindStrength: { value: 0.14 },
+    uTrampleMap: { value: defaultTrampleTexture },
+    uTrampleCenter: { value: new THREE.Vector2(0, 0) },
+    uTrampleSize: { value: GRASS_CONFIG.trample.mapSize },
+    uCameraPos: { value: new THREE.Vector3(0, 0, 0) },
+    uFadeStart: { value: 35.0 },
+    uFadeEnd: { value: 45.0 },
   };
+}
 
-  material.userData.isSharedMaterial = true;
-  material.customProgramCacheKey = () => 'InteractiveGrassMaterial_v5';
-
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = { value: 0 };
-    shader.uniforms.uWindSpeed = { value: 1.8 };
-    shader.uniforms.uWindStrength = { value: 0.14 };
-    shader.uniforms.uTrampleMap = { value: defaultTrampleTexture };
-    shader.uniforms.uTrampleCenter = { value: new THREE.Vector2(0, 0) };
-    shader.uniforms.uTrampleSize = { value: GRASS_CONFIG.trample.mapSize };
-    shader.uniforms.uCameraPos = { value: new THREE.Vector3(0, 0, 0) };
-    shader.uniforms.uFadeStart = { value: 35.0 };
-    shader.uniforms.uFadeEnd = { value: 45.0 };
-
-    material.userData.shader = shader;
-
-    shader.vertexShader = `
+/** Объявления uniform-ов травы, добавляемые в начало вершинного шейдера */
+const GRASS_UNIFORM_DECLARATIONS = `
       uniform float uTime;
       uniform float uWindSpeed;
       uniform float uWindStrength;
@@ -53,12 +46,14 @@ export function createGrassMaterial(): THREE.MeshStandardMaterial {
       uniform vec3 uCameraPos;
       uniform float uFadeStart;
       uniform float uFadeEnd;
-      ${shader.vertexShader}
-    `;
+`;
 
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <project_vertex>',
-      `
+/**
+ * Общий вершинный код травы (заменяет <project_vertex>): ветер, приминание и
+ * затухание по расстоянию до камеры. Именно здесь дальние пучки схлопываются
+ * в ноль — без этого кода окклюдер контуров «съел» бы весь горизонт.
+ */
+const GRASS_VERTEX_PATCH = `
       // Мировое положение корня текущего пучка травы (pivot у земли)
       #ifdef USE_INSTANCING
         vec4 instanceRoot = modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
@@ -117,7 +112,7 @@ export function createGrassMaterial(): THREE.MeshStandardMaterial {
         newY = origY;
       } else {
         // Точный расчет радиуса кривизны: длина дуги (origY) = Радиус * Угол
-        float radius = origY / currentAngle; 
+        float radius = origY / currentAngle;
         forwardOffset = radius * (1.0 - cos(currentAngle));
         newY = radius * sin(currentAngle);
       }
@@ -140,23 +135,87 @@ export function createGrassMaterial(): THREE.MeshStandardMaterial {
 
       vec4 mvPosition = viewMatrix * worldPos;
       gl_Position = projectionMatrix * mvPosition;
-      `
-    );
+`;
 
-    // Устраняем инверсию нормалей Three.js для двусторонней растительности:
-    // Обе стороны травинки находятся под открытым небом и должны ловить свет сверху, а не смотреть в землю.
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <normal_fragment_begin>',
-      `
+/**
+ * Устраняет инверсию нормалей Three.js для двусторонней растительности:
+ * обе стороны травинки находятся под открытым небом и должны ловить свет сверху.
+ */
+const GRASS_NORMAL_PATCH = `
       #include <normal_fragment_begin>
       #ifdef DOUBLE_SIDED
         if ( ! gl_FrontFacing ) {
           normal = - normal;
         }
       #endif
-      `
-    );
+`;
+
+/** Внедряет общий вершинный код травы в любой материал (standard/basic) */
+function applyGrassShader(
+  shader: THREE.WebGLProgramParametersWithUniforms,
+  uniforms: GrassMaterialUniforms
+): void {
+  Object.assign(shader.uniforms, uniforms);
+
+  shader.vertexShader = `${GRASS_UNIFORM_DECLARATIONS}\n${shader.vertexShader}`;
+  shader.vertexShader = shader.vertexShader.replace(
+    '#include <project_vertex>',
+    GRASS_VERTEX_PATCH
+  );
+
+  // В MeshBasicMaterial этого чанка нет — replace тогда просто ничего не меняет
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <normal_fragment_begin>',
+    GRASS_NORMAL_PATCH
+  );
+}
+
+/** Основной материал травы (освещение, тени, ветер, приминание, затухание) */
+export function createGrassMaterial(uniforms: GrassMaterialUniforms): THREE.MeshStandardMaterial {
+  const material = new THREE.MeshStandardMaterial({
+    roughness: 0.75,
+    metalness: 0.05,
+    side: THREE.DoubleSide,
+    vertexColors: true,
+  });
+
+  material.defines = {
+    USE_UV: '',
   };
+
+  material.userData.isSharedMaterial = true;
+  material.customProgramCacheKey = () => 'InteractiveGrassMaterial_v5';
+  material.onBeforeCompile = (shader) => applyGrassShader(shader, uniforms);
+
+  return material;
+}
+
+/**
+ * Дешёвый материал травы для прохода оклюдеров контуров: тот же вершинный код
+ * (ветер/приминание/затухание), но без освещения, теней и записи цвета — в маске
+ * от травы нужна только глубина, чтобы она перекрывала контуры объектов позади.
+ */
+export function createGrassOccluderMaterial(
+  uniforms: GrassMaterialUniforms
+): THREE.MeshBasicMaterial {
+  const material = new THREE.MeshBasicMaterial({
+    // Двусторонность обязательна: иначе обратные стороны травинок не пишут глубину
+    side: THREE.DoubleSide,
+    vertexColors: true,
+    fog: false,
+  });
+
+  material.defines = {
+    USE_UV: '',
+  };
+
+  // Материал не должен подменяться scene.overrideMaterial в проходе оклюдеров:
+  // иначе вернётся дешёвый материал без затухания по расстоянию
+  material.allowOverride = false;
+  material.colorWrite = false;
+  material.userData.isSharedMaterial = true;
+  material.customProgramCacheKey = () => 'InteractiveGrassOccluderMaterial_v1';
+  material.onBeforeCompile = (shader) => applyGrassShader(shader, uniforms);
 
   return material;
 }

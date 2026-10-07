@@ -18,6 +18,9 @@ import { IModelPreview } from './IModelPreview';
 import { ThreeModelPreview } from './ThreeModelPreview';
 import { TERRAIN_CONFIG } from '../config/terrainConfig';
 import { GRAPHICS_CONFIG } from '../config/graphicsConfig';
+import { VISUAL_CONFIG } from '../config/visualConfig';
+import { OutlinePass } from './postprocessing/OutlinePass';
+import { GpuProfiler } from './profiling/GpuProfiler';
 
 const DASH_THROW_TRAJECTORY = [5, 5];
 const DASH_EMPTY: number[] = [];
@@ -58,6 +61,8 @@ export class ThreeRenderer implements IRenderer {
   private mouseNDC = new THREE.Vector2();
   private _pickableObjects: THREE.Object3D[] = [];
   private depthRenderTarget: THREE.WebGLRenderTarget | null = null;
+  private outlinePass: OutlinePass | null = null;
+  private gpuProfiler: GpuProfiler;
 
   // --- Временные векторы для оптимизации (Scratch vectors) ---
   private _tempV1 = new THREE.Vector3();
@@ -66,6 +71,20 @@ export class ThreeRenderer implements IRenderer {
   private _tempV4 = new THREE.Vector3();
   private _camPos = new THREE.Vector3();
   private _camDir = new THREE.Vector3();
+
+  // --- Scratch объекты предварительного прохода глубины (без аллокаций в кадре) ---
+  private _projScreenMatrix = new THREE.Matrix4();
+  private _viewFrustum = new THREE.Frustum();
+  private _waterBox3 = new THREE.Box3();
+
+  // --- Умная генерация теней: пересчет только при движении фокуса/зума или по таймеру ---
+  private shadowUpdateTimer = 0;
+  private lastShadowFocusX = 0;
+  private lastShadowFocusZ = 0;
+  private lastShadowDist = -1;
+
+  // Кэшированный цвет фона меню (избегаем аллокации Color каждый кадр)
+  private _menuBackground = new THREE.Color('#111111');
 
   constructor(container: HTMLDivElement) {
     this.container = container;
@@ -123,11 +142,11 @@ export class ThreeRenderer implements IRenderer {
     this.container.appendChild(this.uiCanvas);
     this.uiCtx = this.uiCanvas.getContext('2d')!;
 
-    // Холст мониторинга FPS: компактная перетаскиваемая панель размером 160x72
+    // Холст мониторинга FPS: компактная перетаскиваемая панель размером 168x96
     this.fpsCanvas = document.createElement('canvas');
     this.fpsCanvas.style.display = 'none';
-    this.fpsCanvas.style.width = '160px';
-    this.fpsCanvas.style.height = '72px';
+    this.fpsCanvas.style.width = '168px';
+    this.fpsCanvas.style.height = '96px';
     this.fpsCanvas.style.position = 'absolute';
     this.fpsCanvas.style.zIndex = '99999';
     this.fpsCanvas.style.cursor = 'grab';
@@ -138,6 +157,11 @@ export class ThreeRenderer implements IRenderer {
     this.fpsCtx = this.fpsCanvas.getContext('2d')!;
 
     this.initFpsDragListeners();
+
+    // Отключаем автоматический сброс для суммирования статистики всех проходов кадра
+    this.renderer.info.autoReset = false;
+    this.gpuProfiler = new GpuProfiler();
+    this.gpuProfiler.init(this.renderer);
 
     // Инициализируем сцену
     this.scene = new THREE.Scene();
@@ -247,6 +271,10 @@ export class ThreeRenderer implements IRenderer {
     // Принудительный ресайз для применения нового Render Scale
     this.resize(this.container.clientWidth, this.container.clientHeight);
     this.environmentManager.applySettings();
+
+    // Сброс гейтинга теней: следующий кадр пересчитает их с новыми настройками
+    this.shadowUpdateTimer = 0;
+    this.lastShadowDist = -1;
   }
 
   public getScreenRay(clientX: number, clientY: number): { origin: Vec3; direction: Vec3 } {
@@ -325,7 +353,7 @@ export class ThreeRenderer implements IRenderer {
     const intersects = this.raycaster.intersectObjects(this._pickableObjects, true);
 
     for (const hit of intersects) {
-      if (hit.object.userData.isSelectionOutline || hit.object.userData.isTerrainSkirt) {
+      if (hit.object.userData.isTerrainSkirt) {
         continue;
       }
       let curr: THREE.Object3D | null = hit.object;
@@ -377,8 +405,8 @@ export class ThreeRenderer implements IRenderer {
       const dx = e.clientX - this.fpsDragStart.mouseX;
       const dy = e.clientY - this.fpsDragStart.mouseY;
 
-      const maxW = Math.max(0, this.container.clientWidth - 160);
-      const maxH = Math.max(0, this.container.clientHeight - 72);
+      const maxW = Math.max(0, this.container.clientWidth - 168);
+      const maxH = Math.max(0, this.container.clientHeight - 96);
 
       const newX = Math.max(0, Math.min(maxW, this.fpsDragStart.startX + dx));
       const newY = Math.max(0, Math.min(maxH, this.fpsDragStart.startY + dy));
@@ -409,7 +437,14 @@ export class ThreeRenderer implements IRenderer {
     const baseRatio = resCfg.useDevicePixelRatio
       ? Math.min(window.devicePixelRatio || 1.0, resCfg.maxPixelRatio)
       : 1.0;
-    const effectivePixelRatio = baseRatio * resCfg.scale;
+    let effectivePixelRatio = baseRatio * resCfg.scale;
+
+    // Авто-деградация HiDPI: если число пикселей внутреннего буфера превышает бюджет,
+    // эффективный pixelRatio снижается, чтобы не перегружать фрагментный шейдер на 4K
+    const pixelCount = width * effectivePixelRatio * height * effectivePixelRatio;
+    if (pixelCount > resCfg.pixelBudget) {
+      effectivePixelRatio = Math.max(0.5, Math.sqrt(resCfg.pixelBudget / (width * height)));
+    }
 
     this.renderer.setPixelRatio(effectivePixelRatio);
     this.renderer.setSize(width, height);
@@ -420,17 +455,17 @@ export class ThreeRenderer implements IRenderer {
     this.uiCanvas.width = width;
     this.uiCanvas.height = height;
 
-    // Холст FPS имеет фиксированный размер 160x72 с поддержкой HiDPI
+    // Холст FPS имеет фиксированный размер 168x96 с поддержкой HiDPI
     const dpr = Math.min(window.devicePixelRatio || 1.0, 2.0);
-    this.fpsCanvas.width = Math.round(160 * dpr);
-    this.fpsCanvas.height = Math.round(72 * dpr);
+    this.fpsCanvas.width = Math.round(168 * dpr);
+    this.fpsCanvas.height = Math.round(96 * dpr);
 
     // Удержание панели FPS в пределах видимой области экрана при изменении окна
-    const maxW = Math.max(0, width - 160);
-    const maxH = Math.max(0, height - 72);
+    const maxW = Math.max(0, width - 168);
+    const maxH = Math.max(0, height - 96);
 
     if (this.fpsPos.x < 0) {
-      this.fpsPos.x = Math.max(0, width - 160 - 12);
+      this.fpsPos.x = Math.max(0, width - 168 - 12);
       this.fpsPos.y = 12;
     } else {
       this.fpsPos.x = Math.max(0, Math.min(maxW, this.fpsPos.x));
@@ -441,6 +476,8 @@ export class ThreeRenderer implements IRenderer {
     this.fpsCanvas.style.top = `${this.fpsPos.y}px`;
   }
   public destroy(): void {
+    this.gpuProfiler.dispose();
+
     if (this.onFpsMouseMoveHandler) {
       window.removeEventListener('mousemove', this.onFpsMouseMoveHandler);
     }
@@ -457,6 +494,10 @@ export class ThreeRenderer implements IRenderer {
         this.depthRenderTarget.depthTexture.dispose();
       }
       this.depthRenderTarget = null;
+    }
+    if (this.outlinePass) {
+      this.outlinePass.dispose();
+      this.outlinePass = null;
     }
     if (this.environmentManager) {
       this.environmentManager.destroy();
@@ -489,6 +530,9 @@ export class ThreeRenderer implements IRenderer {
   }
 
   public render(context: RenderContext): void {
+    this.renderer.info.reset();
+    this.gpuProfiler.resolve();
+
     const internalW = this.canvas.width;
     const internalH = this.canvas.height;
     const scale = context.camera.scale;
@@ -607,7 +651,9 @@ export class ThreeRenderer implements IRenderer {
     const visibleRadius = dist * GRAPHICS_CONFIG.shadows.frustumMargin;
 
     this.environmentManager.setVisibility(context.gameMode !== 'menu');
-    this.scene.background = context.gameMode === 'menu' ? new THREE.Color('#111111') : null;
+
+    // Фон меню берем из кэша, чтобы не создавать новый THREE.Color в каждом кадре
+    this.scene.background = context.gameMode === 'menu' ? this._menuBackground : null;
     this.environmentManager.update(
       this.scene,
       this.camera,
@@ -615,6 +661,10 @@ export class ThreeRenderer implements IRenderer {
       env,
       visibleRadius
     );
+
+    // Служебные проходы (глубина воды, маски обводки) никогда не пересчитывают теневые карты.
+    // Решение об обновлении теней принимается только перед финальным рендером сцены.
+    this.renderer.shadowMap.autoUpdate = false;
 
     // --- 1. ПРЕДВАРИТЕЛЬНЫЙ ПРОХОД ГЛУБИНЫ ДЛЯ ВОДЫ (SHORELINE FOAM & DEPTH EXTINCTION) ---
     const waterMeshes: THREE.Object3D[] = [];
@@ -630,15 +680,15 @@ export class ThreeRenderer implements IRenderer {
     // Проверка видимости воды в пирамиде камеры (Frustum Culling)
     let hasVisibleWater = false;
     if (waterMeshes.length > 0) {
-      const projScreenMatrix = new THREE.Matrix4().multiplyMatrices(
+      this._projScreenMatrix.multiplyMatrices(
         this.camera.projectionMatrix,
         this.camera.matrixWorldInverse
       );
-      const frustum = new THREE.Frustum().setFromProjectionMatrix(projScreenMatrix);
+      this._viewFrustum.setFromProjectionMatrix(this._projScreenMatrix);
 
       for (let i = 0; i < waterMeshes.length; i++) {
-        const box = new THREE.Box3().setFromObject(waterMeshes[i]);
-        if (frustum.intersectsBox(box)) {
+        this._waterBox3.setFromObject(waterMeshes[i]);
+        if (this._viewFrustum.intersectsBox(this._waterBox3)) {
           hasVisibleWater = true;
           break;
         }
@@ -647,9 +697,9 @@ export class ThreeRenderer implements IRenderer {
 
     // Оптимизация: проход глубины запускается ТОЛЬКО если вода реально видна на экране
     if (hasVisibleWater) {
-      // Половинное разрешение для прохода глубины (сокращает нагрузку на GPU на 75%)
-      const depthW = Math.max(1, Math.floor(internalW * 0.5));
-      const depthH = Math.max(1, Math.floor(internalH * 0.5));
+      // Пониженное разрешение прохода глубины (0.25 — 1/16 пикселей, сокращает нагрузку на GPU)
+      const depthW = Math.max(1, Math.floor(internalW * GRAPHICS_CONFIG.water.depthPassScale));
+      const depthH = Math.max(1, Math.floor(internalH * GRAPHICS_CONFIG.water.depthPassScale));
 
       if (!this.depthRenderTarget) {
         this.depthRenderTarget = new THREE.WebGLRenderTarget(depthW, depthH, {
@@ -684,10 +734,12 @@ export class ThreeRenderer implements IRenderer {
       this.brushCursor.visible = false;
 
       // Рендерим только рельеф, камни и персонажей в буфер глубины
+      this.gpuProfiler.beginPass('Water Depth');
       this.renderer.setRenderTarget(this.depthRenderTarget);
       this.renderer.clear();
       this.renderer.render(this.scene, this.camera);
       this.renderer.setRenderTarget(null);
+      this.gpuProfiler.endPass();
 
       // Восстанавливаем видимость объектов
       this.transformControl.getHelper().visible = prevGizmoVis;
@@ -712,14 +764,80 @@ export class ThreeRenderer implements IRenderer {
             u.tDepth.value = depthTex;
             u.uCameraNear.value = this.camera.near;
             u.uCameraFar.value = this.camera.far;
+            // ВАЖНО: это размер ИТОГОВОГО кадра (в пикселях фреймбуфера), а не таргета
+            // глубины. Шейдер нормализует gl_FragCoord этим размером, поэтому
+            // передача depthW/depthH давала бы UV в диапазоне 0..4 и выборки
+            // глубины вне [0,1] почти на всей площади кадра (см. WaterMaterial).
             u.uResolution.value.set(internalW, internalH);
+            // Размер текселя таргета глубины: шейдер интерполирует глубину вручную
+            // (depth-текстуры не filterable в GLES3), и ему нужен шаг сетки
+            u.uDepthTexel.value.set(1 / depthW, 1 / depthH);
           }
         });
       }
     }
 
     // --- 2. ФИНАЛЬНЫЙ РЕНДЕР СЦЕНЫ С ВОДОЙ И ТЕНЯМИ НА ЭКРАН ---
+    // Умное обновление теней.
+    //
+    // В динамических режимах (simulation/game) карта теней пересчитывается КАЖДЫЙ кадр:
+    // существа и предметы непрерывно движутся, и при троттлинге их тени заметно «дёргаются».
+    // В статичных режимах (editor/menu) сцена неподвижна — там остается троттлинг
+    // по смещению фокуса камеры и по таймеру (движение солнца в течение суток).
+    const shadowCfg = GRAPHICS_CONFIG.shadows;
+    const isDynamicScene = context.gameMode === 'simulation' || context.gameMode === 'game';
+
+    const focusMoved =
+      this.lastShadowDist < 0 ||
+      Math.hypot(centerX - this.lastShadowFocusX, centerZ - this.lastShadowFocusZ) >=
+        shadowCfg.cameraMoveThreshold ||
+      Math.abs(dist - this.lastShadowDist) > this.lastShadowDist * 0.05;
+
+    this.shadowUpdateTimer =
+      this.shadowUpdateTimer >= shadowCfg.updateIntervalFrames - 1 ? 0 : this.shadowUpdateTimer + 1;
+
+    // В редакторе геометрия меняется принудительно: гизмо перетаскивают, кистью красят
+    // рельеф и флору. Такие изменения не ловятся порогом движения камеры.
+    const isEditorInteracting =
+      this.transformControl.dragging ||
+      Boolean(context.editorData.terrainBrush?.active) ||
+      Boolean(context.editorData.propBrush?.active);
+
+    const needShadowUpdate =
+      Boolean(shadowCfg.enabled) &&
+      (isDynamicScene && shadowCfg.dynamicEveryFrame
+        ? true
+        : focusMoved || this.shadowUpdateTimer === 0 || isEditorInteracting);
+
+    if (focusMoved) {
+      this.lastShadowFocusX = centerX;
+      this.lastShadowFocusZ = centerZ;
+      this.lastShadowDist = dist;
+    }
+
+    this.renderer.shadowMap.autoUpdate = needShadowUpdate;
+    this.gpuProfiler.beginPass('Scene');
     this.renderer.render(this.scene, this.camera);
+    this.gpuProfiler.endPass();
+    this.renderer.shadowMap.autoUpdate = false;
+
+    // --- 2.1 ПОСТ-ПРОЦЕСС ОБВОДОК (cel-shading контур + выделение выбора) ---
+    const hasSelection = context.editorData.selectedIds && context.editorData.selectedIds.size > 0;
+    if (context.celShading || hasSelection) {
+      if (!this.outlinePass) {
+        this.outlinePass = new OutlinePass();
+      }
+      this.gpuProfiler.beginPass('Outlines');
+      this.outlinePass.render(this.renderer, this.scene, this.camera, internalW, internalH, {
+        cel: Boolean(context.celShading),
+        select: hasSelection,
+        selectColor:
+          context.gameMode === 'game'
+            ? VISUAL_CONFIG.selection.gameSelectedColor
+            : VISUAL_CONFIG.selection.editorSelectedColor,
+      });
+      this.gpuProfiler.endPass();
+    }
 
     // --- Отрисовка 2D UI поверх 3D сцены (полная гарантированная очистка всего холста) ---
     this.uiCtx.clearRect(0, 0, this.uiCanvas.width, this.uiCanvas.height);
@@ -757,8 +875,8 @@ export class ThreeRenderer implements IRenderer {
       this.fpsCanvas.style.display = 'block';
     }
 
-    const boxW = 160;
-    const boxH = 72;
+    const boxW = 168;
+    const boxH = 96;
     const dpr = Math.min(window.devicePixelRatio || 1.0, 2.0);
 
     const ctx = this.fpsCtx;
@@ -775,28 +893,44 @@ export class ThreeRenderer implements IRenderer {
     ctx.lineWidth = 1;
     ctx.strokeRect(0, 0, boxW, boxH);
 
-    // 2. Блок текстовых метрик
+    // 2. Строка 1: FPS / AVG / MIN
     ctx.font = 'bold 11px monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
 
-    // Текущий FPS
     ctx.fillStyle = '#00ff66';
     ctx.fillText(`FPS: ${stats.current}`, 8, 6);
 
-    // AVG и MIN FPS
     ctx.font = '10px monospace';
     ctx.fillStyle = '#a7f3d0';
-    ctx.fillText(`AVG: ${stats.avg.toFixed(1)}`, 74, 6);
+    ctx.fillText(`AVG: ${stats.avg.toFixed(1)}`, 72, 6);
 
     ctx.fillStyle = stats.min < 30 ? '#f87171' : '#6ee7b7';
-    ctx.fillText(`MIN: ${stats.min.toFixed(1)}`, 74, 18);
+    ctx.fillText(`MIN: ${stats.min.toFixed(1)}`, 122, 6);
 
-    // 3. Область графика
+    // 3. Строка 2: GPU Time / Draw Calls / Triangles
+    const gpuResult = this.gpuProfiler.getResult();
+    if (gpuResult.isSupported) {
+      const gpuMs = gpuResult.totalMs;
+      ctx.fillStyle = gpuMs >= 16.0 ? '#f87171' : gpuMs >= 10.0 ? '#fde047' : '#38bdf8';
+      ctx.fillText(`GPU: ${gpuMs.toFixed(1)}ms`, 8, 19);
+    } else {
+      ctx.fillStyle = '#9ca3af';
+      ctx.fillText('GPU: N/A', 8, 19);
+    }
+
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillText(`DC: ${this.renderer.info.render.calls}`, 78, 19);
+
+    const triangles = this.renderer.info.render.triangles;
+    const triText = triangles >= 1000 ? `${(triangles / 1000).toFixed(1)}k` : `${triangles}`;
+    ctx.fillText(`TRI: ${triText}`, 120, 19);
+
+    // 4. Область графика
     const graphX = 6;
-    const graphY = 30;
+    const graphY = 34;
     const graphW = boxW - 12;
-    const graphH = boxH - 35;
+    const graphH = boxH - 40;
 
     // Сетка графика
     ctx.strokeStyle = 'rgba(16, 185, 129, 0.16)';
@@ -816,7 +950,7 @@ export class ThreeRenderer implements IRenderer {
     }
     ctx.stroke();
 
-    // 4. Отрисовка кривой и полупрозрачной заливки
+    // 5. Отрисовка кривой и градиентной заливки FPS
     const history = stats.history;
     if (history.length >= 2) {
       let maxVal = 60;
@@ -827,7 +961,6 @@ export class ThreeRenderer implements IRenderer {
 
       const stepX = graphW / (history.length - 1);
 
-      // Заливка под графиком градиентом
       ctx.beginPath();
       ctx.moveTo(graphX, graphY + graphH);
 
@@ -848,7 +981,6 @@ export class ThreeRenderer implements IRenderer {
       ctx.fillStyle = grad;
       ctx.fill();
 
-      // Линия графика
       ctx.beginPath();
       for (let i = 0; i < history.length; i++) {
         const val = Math.min(maxVal, Math.max(0, history[i]));

@@ -570,6 +570,7 @@ export class GameApp implements IEditorContext, ISelectionHostContext {
     this.renderer.render({
       camera: this.camera,
       gameMode: this.gameMode,
+      celShading: this._celShading,
       editorData: {
         selectedId: this.selection.selectedEntityId,
         selectedIds: this.selection.selectedEntityIds,

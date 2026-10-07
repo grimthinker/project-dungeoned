@@ -6,6 +6,7 @@ import { TerrainSkirtGeometryBuilder } from './TerrainSkirtGeometryBuilder';
 import { TerrainChunk } from './TerrainChunk';
 import { disposeObject } from '../renderUtils';
 import { TERRAIN_CONFIG } from '../../config/terrainConfig';
+import { OUTLINE_OCCLUDER_LAYER } from '../outlineMask';
 
 export class TerrainSyncSystem {
   private chunks = new Map<string, TerrainChunk>();
@@ -63,6 +64,8 @@ export class TerrainSyncSystem {
     const skirtMesh = new THREE.Mesh(skirtGeo, skirtMat);
     skirtMesh.receiveShadow = true;
     skirtMesh.userData.isTerrainSkirt = true;
+    // Юбка горизонта тоже перекрывает контуры объектов у края карты
+    skirtMesh.layers.enable(OUTLINE_OCCLUDER_LAYER);
     this.rootGroup.add(skirtMesh);
 
     terrainComp.isGeometryDirty = false;
