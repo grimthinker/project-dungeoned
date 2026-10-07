@@ -265,23 +265,22 @@ export class SelectionController {
     };
 
     if (clientX !== undefined && clientY !== undefined) {
-      // 1. Приоритетный клик по мешам Three.js (позволяет выбирать конкретные части тела partId)
-      if (this.host.renderer.pickEntity) {
-        const picked = this.host.renderer.pickEntity(clientX, clientY);
-        if (picked && !isUnpickable(picked)) return picked;
-      }
-
-      // 2. Физический рейкаст Rapier3D (страховка при промахе сквозь меш или клике по коллайдерам)
+      // 1. Физический рейкаст Rapier3D (работает через быстрый WASM BVH)
       if (this.host.raycastPhysics) {
         const hit = this.host.raycastPhysics(clientX, clientY);
         if (hit && hit.entityId && !isUnpickable(hit.entityId)) {
           return hit.entityId;
         }
       }
+
+      // 2. Визуальный рейкаст Three.js (медленный, используем как фоллбэк для объектов без физики)
+      if (this.host.renderer.pickEntity) {
+        const picked = this.host.renderer.pickEntity(clientX, clientY);
+        if (picked && !isUnpickable(picked)) return picked;
+      }
     }
     return null;
   }
-
   public pickNearestEntity(
     worldPoint: Vec3,
     maxDistanceRatio: number = VISUAL_CONFIG.creatureHoverScreenRatio ?? 0.02,
@@ -289,13 +288,15 @@ export class SelectionController {
     clientY?: number
   ): string | null {
     if (clientX !== undefined && clientY !== undefined) {
-      if (this.host.renderer.pickEntity) {
-        const picked = this.host.renderer.pickEntity(clientX, clientY);
-        if (picked) return picked;
-      }
+      // 1. Физический рейкаст Rapier3D (сверхбыстрый, WASM)
       if (this.host.raycastPhysics) {
         const hit = this.host.raycastPhysics(clientX, clientY);
         if (hit && hit.entityId) return hit.entityId;
+      }
+      // 2. Фолбэк на визуальный рейкаст Three.js (медленный, обходит вершины)
+      if (this.host.renderer.pickEntity) {
+        const picked = this.host.renderer.pickEntity(clientX, clientY);
+        if (picked) return picked;
       }
     }
 
@@ -315,9 +316,13 @@ export class SelectionController {
       const physStats = this.host.world.getComponent(entityId, 'physicsStats');
       if (!isEditor && !physicsBody && !physStats) continue;
 
+      // Быстрое отсечение по осям (Manhattan distance) перед тяжелым Math.hypot
       const dx = transform.x - worldPoint.x;
-      const dy = transform.y - worldPoint.y;
+      if (Math.abs(dx) > maxWorldDist + 2.0) continue;
       const dz = transform.z - worldPoint.z;
+      if (Math.abs(dz) > maxWorldDist + 2.0) continue;
+
+      const dy = transform.y - worldPoint.y;
       const dist = Math.hypot(dx, dy, dz);
 
       const radius = physStats?.radius.current ?? 0.4;

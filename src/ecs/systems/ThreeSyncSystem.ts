@@ -707,6 +707,16 @@ export class ThreeSyncSystem {
         }
 
         const isSelected = selectedIds.has(id);
+
+        // Оптимизация: Рисуем тяжелую обводку Cel Shading только для динамических и важных объектов.
+        // Статичное окружение (деревья, скалы) получит мультяшный свет, но сэкономит 50% Draw Calls.
+        const meta = world.getComponent(id, 'meta');
+        const isDynamicOrImportant =
+          archetype === 'creature' ||
+          archetype === 'item' ||
+          archetype === 'bodyPart' ||
+          (archetype === 'obstacle' && meta?.destructible === true);
+
         obj.traverse((child) => {
           if (child instanceof THREE.Mesh && child.userData.isSelectionOutline) {
             if (isSelected) {
@@ -715,7 +725,7 @@ export class ThreeSyncSystem {
                   ? this.matGameSilhouetteOutline
                   : this.matSilhouetteOutline;
               child.visible = true;
-            } else if (this.isCelShading) {
+            } else if (this.isCelShading && isDynamicOrImportant) {
               child.material = this.matCelOutline;
               child.visible = true;
             } else {
@@ -1020,11 +1030,21 @@ export class ThreeSyncSystem {
     return stamps;
   }
 
-  public collectUIOverlays(world: World, gameMode: string): EntityOverlayDTO[] {
+  public collectUIOverlays(
+    world: World,
+    gameMode: string,
+    camX: number,
+    camZ: number
+  ): EntityOverlayDTO[] {
     const list: EntityOverlayDTO[] = [];
     const entities = world.getEntitiesWith('transform', 'meta');
+    const maxDistSq = 50.0 * 50.0; // Плашки видны не дальше 50 метров
 
     for (const [id, entity] of entities) {
+      // Отсечение по дистанции от камеры
+      const dx = entity.transform.x - camX;
+      const dz = entity.transform.z - camZ;
+      if (dx * dx + dz * dz > maxDistSq) continue;
       const tag = world.getComponent(id, 'tag');
       const archetype = tag?.archetype ?? entity.meta?.entityType;
 

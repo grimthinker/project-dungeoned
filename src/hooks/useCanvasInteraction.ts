@@ -468,7 +468,7 @@ export const useCanvasInteraction = ({
 
     // Троттлинг тяжелых операций (raycast, hover-поиск в ECS и обновление React-статуса)
     const now = performance.now();
-    if (now - lastHoverCheckRef.current >= 30) {
+    if (now - lastHoverCheckRef.current >= 80) {
       lastHoverCheckRef.current = now;
       const point = app.getCanvasPoint(e.clientX, e.clientY);
 
@@ -476,12 +476,14 @@ export const useCanvasInteraction = ({
         lastCursorUpdateRef.current = now;
         setCursorWorldPos({ x: point.x, y: point.y, z: point.z });
       }
-
       let isHoveringEntity = false;
       if (placementMode) {
         app.selection.hoverEntity(null);
       } else if (mode === GameMode.EDITOR) {
-        const nearestId = app.selection.pickNearestEntity(point, undefined, e.clientX, e.clientY);
+        // Убираем передачу координат мыши, чтобы полностью отключить
+        // тяжелый визуальный Raycast при простом перемещении курсора (Hover).
+        // Оставляем только мгновенный O(N) просчет 3D-дистанций до точки на земле.
+        const nearestId = app.selection.pickNearestEntity(point);
         app.selection.hoverEntity(nearestId);
         isHoveringEntity = nearestId !== null;
       }

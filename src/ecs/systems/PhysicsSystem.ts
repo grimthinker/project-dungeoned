@@ -533,9 +533,13 @@ export class PhysicsSystem {
         const mB = compB.physicsStats.totalWeight ?? compB.physicsStats.weight.current ?? 75;
 
         const dx = compA.transform.x - compB.transform.x;
-        const dz = compA.transform.z - compB.transform.z;
-        const distSq = dx * dx + dz * dz;
         const minDist = rA + rB;
+        if (Math.abs(dx) > minDist) continue; // Fast AABB reject
+
+        const dz = compA.transform.z - compB.transform.z;
+        if (Math.abs(dz) > minDist) continue; // Fast AABB reject
+
+        const distSq = dx * dx + dz * dz;
 
         if (distSq < minDist * minDist) {
           const dist = Math.sqrt(distSq);

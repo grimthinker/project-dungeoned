@@ -134,8 +134,9 @@ export class EnvironmentManager {
     const twilightT = Math.max(0.0, Math.min(1.0, (sunElevation - -0.08) / twilightRange));
     const smoothSunShadow = twilightT * twilightT * (3.0 - 2.0 * twilightT);
     const smoothMoonShadow = 1.0 - smoothSunShadow;
+    const shadowEnabled = GRAPHICS_CONFIG.shadows.enabled;
 
-    if (smoothSunShadow > 0.001) {
+    if (shadowEnabled && smoothSunShadow > 0.001) {
       this.sunLight.castShadow = true;
       this.sunLight.shadow.intensity = smoothSunShadow;
       this.alignLightWithTarget(this.sunLight, this.sunDir, focusTarget, visibleRadius);
@@ -144,7 +145,7 @@ export class EnvironmentManager {
       this.sunLight.shadow.intensity = 0.0;
     }
 
-    if (smoothMoonShadow > 0.001) {
+    if (shadowEnabled && smoothMoonShadow > 0.001) {
       this.moonLight.castShadow = true;
       this.moonLight.shadow.intensity = smoothMoonShadow;
       this.alignLightWithTarget(this.moonLight, this.moonDir, focusTarget, visibleRadius);

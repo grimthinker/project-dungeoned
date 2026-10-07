@@ -549,7 +549,12 @@ export class GameApp implements IEditorContext, ISelectionHostContext {
     const environment = envEntities.length > 0 ? envEntities[0][1].environment : undefined;
 
     const uiOverlays = this.showUIOverlays
-      ? this.simulation.threeSyncSystem.collectUIOverlays(this.world, this.gameMode)
+      ? this.simulation.threeSyncSystem.collectUIOverlays(
+          this.world,
+          this.gameMode,
+          this.camera.targetX,
+          this.camera.targetZ
+        )
       : undefined;
 
     const hoveredItemTooltip = this.simulation.threeSyncSystem.collectItemTooltip(
