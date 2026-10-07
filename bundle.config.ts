@@ -151,11 +151,14 @@ export const DOMAINS = {
   // Визуальный нодовый редактор диалогов (@xyflow/react)
   dialogue_editor: [
     'src/dialogue/**/*',
+    'src/gameplay/**/*',
     'src/components/dialogueEditor/**/*',
+    'src/components/gameplayEditor/**/*',
     'src/components/inspector/DialogueInspector.tsx',
     'src/components/gameHud/BlockDialogue.tsx',
     'src/ecs/systems/DialogueSystem.ts',
     'src/ecs/components/dialogue.ts',
+    'src/ecs/components/triggerRule.ts',
     'src/ecs/WorldSerializer.ts',
   ],
 

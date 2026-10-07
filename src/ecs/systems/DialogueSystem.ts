@@ -14,6 +14,9 @@ import { getDialogueGraph } from '../../dialogue/dialogueRegistry';
 import { StoryFlagsManager } from '../../dialogue/StoryFlagsManager';
 import { EventBus } from '../../core/EventBus';
 import { Radians } from '../../utils';
+import { ConditionEvaluator } from '../../gameplay/conditions/ConditionEvaluator';
+import { ActionDispatcher } from '../../gameplay/actions/ActionDispatcher';
+import { ActionExecutionContext } from '../../gameplay/types';
 
 interface ActiveDialogueSession {
   npcId: EntityId;
@@ -91,7 +94,13 @@ export class DialogueSystem {
       npcInput.moveStrafe = 0;
     }
 
-    this.executeActions(world, startNode.onEnterActions);
+    const context: ActionExecutionContext = {
+      world,
+      app: this.app,
+      sourceEntityId: npcId,
+      activatorEntityId: playerId,
+    };
+    ActionDispatcher.executeAll(startNode.onEnterActions, context);
     this.emitCurrentState(world);
     return true;
   }
@@ -106,7 +115,14 @@ export class DialogueSystem {
     const choice = currentNode.choices.find((c) => c.id === choiceId);
     if (!choice) return;
 
-    if (!this.checkConditions(world, choice.conditions)) return;
+    const context: ActionExecutionContext = {
+      world,
+      app: this.app,
+      sourceEntityId: npcId,
+      activatorEntityId: playerId,
+    };
+
+    if (!ConditionEvaluator.evaluateAll(choice.conditions, context)) return;
 
     const playerMeta = world.getComponent(playerId, 'meta');
     const playerName = playerMeta?.name || 'Вы';
@@ -120,7 +136,7 @@ export class DialogueSystem {
     });
 
     // Применяем эффекты ответа игрока
-    this.executeActions(world, choice.actions);
+    ActionDispatcher.executeAll(choice.actions, context);
 
     // Если выбор ведет в null — завершаем разговор
     if (!choice.targetNodeId) {
@@ -147,7 +163,7 @@ export class DialogueSystem {
       isPlayer: false,
     });
 
-    this.executeActions(world, nextNode.onEnterActions);
+    ActionDispatcher.executeAll(nextNode.onEnterActions, context);
     this.emitCurrentState(world);
   }
 
@@ -165,15 +181,22 @@ export class DialogueSystem {
   public getActiveDialogueDTO(world: World): ActiveDialogueDTO | null {
     if (!this.activeSession) return null;
 
-    const { npcId, dialogueId, currentNodeId, graph, history } = this.activeSession;
+    const { npcId, dialogueId, currentNodeId, graph, history, playerId } = this.activeSession;
     const node = graph.nodes[currentNodeId];
     if (!node) return null;
 
     const npcMeta = world.getComponent(npcId, 'meta');
     const npcName = npcMeta?.name || 'Собеседник';
 
+    const context: ActionExecutionContext = {
+      world,
+      app: this.app,
+      sourceEntityId: npcId,
+      activatorEntityId: playerId,
+    };
+
     const availableChoices = node.choices
-      .filter((choice) => this.checkConditions(world, choice.conditions))
+      .filter((choice) => ConditionEvaluator.evaluateAll(choice.conditions, context))
       .map((choice) => ({
         id: choice.id,
         text: choice.text,
@@ -217,67 +240,6 @@ export class DialogueSystem {
     if (dist > DIALOGUE_CONFIG.maxInteractionDistance) {
       this.closeDialogue(world);
       return;
-    }
-  }
-
-  private checkConditions(world: World, conditions?: DialogueCondition[]): boolean {
-    if (!conditions || conditions.length === 0) return true;
-
-    for (const cond of conditions) {
-      switch (cond.type) {
-        case 'flag_equals':
-          if (StoryFlagsManager.getFlag(cond.key) !== cond.value) return false;
-          break;
-        case 'flag_has':
-          if (!StoryFlagsManager.hasFlag(cond.key) || !StoryFlagsManager.getFlag(cond.key))
-            return false;
-          break;
-        case 'flag_not':
-          if (StoryFlagsManager.hasFlag(cond.key) && StoryFlagsManager.getFlag(cond.key))
-            return false;
-          break;
-        case 'has_item': {
-          if (!this.activeSession) return false;
-          const slots = world.getComponent(this.activeSession.playerId, 'interactionSlots');
-          if (slots?.itemId === cond.key) break;
-          return false;
-        }
-        case 'is_alive': {
-          const targetHealth = world.getComponent(cond.key, 'health');
-          if (!targetHealth?.isAlive) return false;
-          break;
-        }
-      }
-    }
-    return true;
-  }
-
-  private executeActions(
-    world: World,
-    actions?: import('../../dialogue/types').DialogueAction[]
-  ): void {
-    if (!actions || actions.length === 0) return;
-
-    for (const act of actions) {
-      switch (act.type) {
-        case 'set_flag':
-          if (act.payload?.key) {
-            StoryFlagsManager.setFlag(act.payload.key, act.payload.value);
-          }
-          break;
-        case 'change_ai':
-          if (this.activeSession && act.payload?.behavior) {
-            const targetId =
-              act.payload.entity === 'npc' ? this.activeSession.npcId : act.payload.entity;
-            if (targetId) {
-              this.app.mutations.updateEntityAIBehavior(targetId, act.payload.behavior);
-            }
-          }
-          break;
-        case 'end_dialogue':
-          this.closeDialogue(world);
-          break;
-      }
     }
   }
 

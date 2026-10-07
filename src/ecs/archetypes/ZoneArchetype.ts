@@ -148,6 +148,96 @@ export function createGameplayZoneConfig(
   };
 }
 
+export function createTrapZoneConfig(damage: number = 45, radius: number = 1.2): EntityConfig {
+  return {
+    tag: { archetype: 'zone', subType: 'trap' },
+    meta: {
+      name: 'Наземная ловушка',
+      entityType: 'zone',
+    },
+    zoneShape: {
+      shapeType: 'cylinder',
+      radius,
+      height: 0.5,
+      width: radius * 2,
+      depth: radius * 2,
+    },
+    gameplayZone: {
+      role: 'generic',
+      zoneTag: 'ground_trap',
+      occupantIds: [],
+    },
+    triggerRule: {
+      rules: [
+        {
+          id: 'trap_rule_damage',
+          name: 'Срабатывание ловушки стоя',
+          event: 'zone_entered',
+          conditions: [
+            { type: 'stance_not', key: 'stance', value: 'crouching' },
+            { type: 'stance_not', key: 'stance', value: 'prone' },
+          ],
+          actions: [{ type: 'deal_damage', payload: { target: 'activator', amount: damage } }],
+          triggerOnce: true,
+        },
+      ],
+    },
+    physics: {
+      radius,
+      weight: 1,
+      isSolid: false,
+    },
+  };
+}
+
+export function createTriggerSpawnerConfig(radius: number = 3.0): EntityConfig {
+  return {
+    tag: { archetype: 'zone', subType: 'spawner' },
+    meta: {
+      name: 'Триггер спавна врагов',
+      entityType: 'zone',
+    },
+    zoneShape: {
+      shapeType: 'cylinder',
+      radius,
+      height: 2.0,
+      width: radius * 2,
+      depth: radius * 2,
+    },
+    gameplayZone: {
+      role: 'generic',
+      zoneTag: 'ambush_spawner',
+      occupantIds: [],
+    },
+    triggerRule: {
+      rules: [
+        {
+          id: 'spawner_rule',
+          name: 'Спавн засады при входе бота или игрока',
+          event: 'zone_entered',
+          conditions: [{ type: 'is_alive', key: 'activator' }],
+          actions: [
+            {
+              type: 'set_flag',
+              payload: { key: 'ambush_triggered', value: true },
+            },
+            {
+              type: 'deal_damage',
+              payload: { target: 'activator', amount: 10 },
+            },
+          ],
+          triggerOnce: true,
+        },
+      ],
+    },
+    physics: {
+      radius,
+      weight: 1,
+      isSolid: false,
+    },
+  };
+}
+
 export function assembleZone(
   world: World,
   _physics: PhysicsSystem,

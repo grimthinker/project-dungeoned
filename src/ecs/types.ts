@@ -18,7 +18,9 @@ export * from './components/zone';
 export * from './components/interaction';
 export * from './components/dialogue';
 export * from './components/readable';
+export * from './components/triggerRule';
 
+import { TriggerRuleComponent } from './components/triggerRule';
 import { ReadableComponent } from './components/readable';
 import { FetchStickComponent } from './components/fetch';
 import { DialogueTargetComponent, InDialogueComponent } from './components/dialogue';
@@ -160,6 +162,7 @@ export interface EntityComponents {
   dialogueTarget?: DialogueTargetComponent;
   inDialogue?: InDialogueComponent;
   readable?: ReadableComponent;
+  triggerRule?: TriggerRuleComponent;
 }
 
 export const SERIALIZABLE_COMPONENT_KEYS: ReadonlyArray<keyof EntityComponents> = [
@@ -216,6 +219,7 @@ export const SERIALIZABLE_COMPONENT_KEYS: ReadonlyArray<keyof EntityComponents> 
   'interactable',
   'dialogueTarget',
   'readable',
+  'triggerRule',
 ] as const;
 
 export interface EntityConfig {
@@ -263,4 +267,5 @@ export interface EntityConfig {
   interactable?: InteractableComponent;
   dialogueTarget?: DialogueTargetComponent;
   readable?: ReadableComponent;
+  triggerRule?: TriggerRuleComponent;
 }

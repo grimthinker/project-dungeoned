@@ -18,6 +18,7 @@ import { AttachmentSystem } from '../ecs/systems/AttachmentSystem';
 import { ThreeSyncSystem } from '../ecs/systems/ThreeSyncSystem';
 import { EnvironmentSystem } from '../ecs/systems/EnvironmentSystem';
 import { DialogueSystem } from '../ecs/systems/DialogueSystem';
+import { TriggerRuleSystem } from '../ecs/systems/TriggerRuleSystem';
 import { EntityFactory } from '../ecs/EntityFactory';
 import { WorldSerializer, SerializedWorldData } from '../ecs/WorldSerializer';
 import { IPhysicsDriver } from '../physics/IPhysicsDriver';
@@ -60,6 +61,7 @@ export class GameSimulation {
   public attachmentSystem: AttachmentSystem;
   public environmentSystem: EnvironmentSystem;
   public dialogueSystem: DialogueSystem;
+  public triggerRuleSystem: TriggerRuleSystem;
 
   public entityFactory: EntityFactory;
   public serializer: WorldSerializer;
@@ -89,6 +91,7 @@ export class GameSimulation {
     this.attachmentSystem = new AttachmentSystem();
     this.environmentSystem = new EnvironmentSystem();
     this.dialogueSystem = new DialogueSystem(app);
+    this.triggerRuleSystem = new TriggerRuleSystem(app);
     this.entityFactory = new EntityFactory();
     this.serializer = new WorldSerializer(app);
 
@@ -561,6 +564,7 @@ export class GameSimulation {
   }
 
   public destroy(): void {
+    this.triggerRuleSystem.destroy();
     this.threeSyncSystem.destroy();
     this.physicsDriver.destroy();
   }

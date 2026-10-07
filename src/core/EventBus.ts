@@ -40,6 +40,7 @@ export interface EventMap {
   'input:cancelTargeting': void;
   'zone:entered': { zoneId: string; entityId: string };
   'zone:exited': { zoneId: string; entityId: string };
+  'item:picked_up': { pickerId: string; itemId: string };
   'dialogue:state-changed': ActiveDialogueDTO;
   'dialogue:closed': void;
   'dialogue:registry-updated': void;

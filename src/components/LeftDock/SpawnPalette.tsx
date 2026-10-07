@@ -4,6 +4,8 @@ import { BodyStructureType } from '../../ecs/templates';
 import {
   createEffectorZoneConfig,
   createGameplayZoneConfig,
+  createTrapZoneConfig,
+  createTriggerSpawnerConfig,
 } from '../../ecs/archetypes/ZoneArchetype';
 import {
   createHouseConfig,
@@ -720,6 +722,20 @@ export const SpawnPalette: React.FC<SpawnPaletteProps> = ({
               radius: 18.0,
               height: 3.0,
             }),
+        },
+        {
+          id: 'zone_trap_ground',
+          name: 'Наземная ловушка (Капкан)',
+          description: 'Наносит 45 урона при наступлении (не срабатывает в приседе)',
+          icon: '🪤',
+          createConfig: () => createTrapZoneConfig(45, 1.2),
+        },
+        {
+          id: 'zone_script_spawner',
+          name: 'Скриптовый спавнер / Триггер',
+          description: 'Зона с проверкой условий и вызовом действий движка',
+          icon: '⚡',
+          createConfig: () => createTriggerSpawnerConfig(3.0),
         },
         {
           id: 'zone_damage',

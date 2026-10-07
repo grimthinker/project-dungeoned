@@ -1,19 +1,15 @@
-export type DialogueConditionType =
-  'flag_equals' | 'flag_has' | 'flag_not' | 'has_item' | 'is_alive';
+import {
+  GameplayCondition,
+  GameplayAction,
+  GameplayConditionType,
+  GameplayActionType,
+} from '../gameplay/types';
 
-export interface DialogueCondition {
-  type: DialogueConditionType;
-  key: string;
-  value?: any;
-}
+export type DialogueConditionType = GameplayConditionType;
+export type DialogueCondition = GameplayCondition;
 
-export type DialogueActionType =
-  'set_flag' | 'change_ai' | 'give_item' | 'take_item' | 'end_dialogue';
-
-export interface DialogueAction {
-  type: DialogueActionType;
-  payload?: any;
-}
+export type DialogueActionType = GameplayActionType;
+export type DialogueAction = GameplayAction;
 
 export interface DialogueChoice {
   id: string;

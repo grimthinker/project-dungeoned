@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { World } from '../../ecs/World';
 import { GameApp } from '../../GameApp';
 import { GameplayZoneRole } from '../../ecs/components/zone';
+import { RuleEditorModal } from '../gameplayEditor/RuleEditorModal';
 
 export interface GameplayZoneInspectorProps {
   targetId: string;
@@ -19,8 +20,11 @@ export const GameplayZoneInspector: React.FC<GameplayZoneInspectorProps> = ({
   onCommit,
 }) => {
   const zone = world.getComponent(targetId, 'gameplayZone');
+  const triggerRule = world.getComponent(targetId, 'triggerRule');
+
   const [role, setRole] = useState<GameplayZoneRole>(zone?.role ?? 'generic');
   const [zoneTag, setZoneTag] = useState<string>(zone?.zoneTag ?? '');
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     const comp = world.getComponent(targetId, 'gameplayZone');
@@ -29,6 +33,8 @@ export const GameplayZoneInspector: React.FC<GameplayZoneInspectorProps> = ({
       setZoneTag(comp.zoneTag ?? '');
     }
   }, [targetId, world]);
+
+  const activeRule = triggerRule?.rules?.[0];
 
   if (!zone) return null;
 
@@ -112,6 +118,59 @@ export const GameplayZoneInspector: React.FC<GameplayZoneInspectorProps> = ({
           <span style={{ fontSize: '10px', color: '#666', fontStyle: 'italic' }}>Зона пуста</span>
         )}
       </div>
+
+      {/* Секция правил триггера и ловушек */}
+      {!isReadOnly && (
+        <div style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => setIsModalOpen(true)}
+            style={{
+              width: '100%',
+              backgroundColor: activeRule ? '#d35400' : '#2980b9',
+              color: '#fff',
+              padding: '6px 8px',
+              fontSize: 11,
+              fontWeight: 'bold',
+            }}
+          >
+            ⚙️{' '}
+            {activeRule
+              ? `Настроить триггер (${activeRule.actions.length} д.)`
+              : '+ Добавить триггерное правило'}
+          </button>
+        </div>
+      )}
+
+      {isModalOpen && (
+        <RuleEditorModal
+          isOpen={true}
+          title={`Правила триггера зоны: "${zoneTag || targetId}"`}
+          subtitle="Событие: вход в зону (zone_entered)"
+          conditions={activeRule?.conditions || []}
+          actions={activeRule?.actions || []}
+          onSave={(conditions, actions) => {
+            let comp = world.getComponent(targetId, 'triggerRule');
+            if (!comp) {
+              comp = { rules: [] };
+              world.addComponent(targetId, 'triggerRule', comp);
+            }
+            comp.rules = [
+              {
+                id: activeRule?.id || `rule_${Date.now()}`,
+                name: 'Правило входа в зону',
+                event: 'zone_entered',
+                conditions,
+                actions,
+                triggerOnce: false,
+              },
+            ];
+            onCommit('Изменение триггерных правил зоны');
+          }}
+          onClose={() => setIsModalOpen(false)}
+        />
+      )}
     </div>
   );
 };

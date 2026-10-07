@@ -18,7 +18,12 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { DialogueGraph, DialogueChoice, DialogueAction } from '../../dialogue/types';
+import {
+  DialogueGraph,
+  DialogueChoice,
+  DialogueAction,
+  DialogueCondition,
+} from '../../dialogue/types';
 import {
   dialogueGraphToFlow,
   flowToDialogueGraph,
@@ -35,6 +40,7 @@ import {
 } from '../../dialogue/dialogueRegistry';
 import { DialogueNodeComponent } from './DialogueNodeComponent';
 import { DialogueEditorTopBar } from './DialogueEditorTopBar';
+import { RuleEditorModal } from '../gameplayEditor/RuleEditorModal';
 
 const nodeTypes = {
   dialogueNode: DialogueNodeComponent,
@@ -43,6 +49,15 @@ const nodeTypes = {
 interface InnerWorkspaceProps {
   initialDialogueId: string;
   onClose: () => void;
+}
+
+interface ModalTargetState {
+  type: 'choice' | 'node';
+  nodeId: string;
+  choiceId?: string;
+  title: string;
+  conditions: DialogueCondition[];
+  actions: DialogueAction[];
 }
 
 const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
@@ -56,10 +71,11 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
   const [nodes, setNodes] = useState<Node<DialogueNodeData>[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
 
+  const [activeModalTarget, setActiveModalTarget] = useState<ModalTargetState | null>(null);
+
   const reactFlowInstance = useReactFlow();
   const reactFlowWrapper = useRef<HTMLDivElement | null>(null);
 
-  // Синхронизация графа из реестра
   const loadGraphIntoWorkspace = useCallback(
     (graph: DialogueGraph) => {
       setCurrentId(graph.id);
@@ -84,7 +100,6 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
     }
   }, [currentId, loadGraphIntoWorkspace]);
 
-  // Сохранение изменений в реестр диалогов
   const saveCurrentGraph = useCallback(
     (
       newNodes: Node<DialogueNodeData>[],
@@ -123,7 +138,6 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
     [nodes, saveCurrentGraph]
   );
 
-  // Соединение портов: гарантируем не более одной исходящей стрелки от одного варианта ответа
   const onConnect = useCallback(
     (connection: Connection) => {
       setEdges((eds) => {
@@ -146,7 +160,6 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
     [nodes, saveCurrentGraph]
   );
 
-  // Коллбэки управления узлами
   const handleUpdateNodeText = useCallback(
     (nodeId: string, text: string) => {
       setNodes((nds) => {
@@ -274,7 +287,76 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
     [saveCurrentGraph]
   );
 
-  // Обогащаем data узлов коллбэками
+  const handleOpenChoiceSettings = useCallback(
+    (nodeId: string, choiceId: string) => {
+      const targetNode = nodes.find((n) => n.id === nodeId);
+      if (!targetNode) return;
+      const targetChoice = targetNode.data.choices?.find((c) => c.id === choiceId);
+      if (!targetChoice) return;
+
+      setActiveModalTarget({
+        type: 'choice',
+        nodeId,
+        choiceId,
+        title: `Настройка ответа: "${targetChoice.text}"`,
+        conditions: targetChoice.conditions ? [...targetChoice.conditions] : [],
+        actions: targetChoice.actions ? [...targetChoice.actions] : [],
+      });
+    },
+    [nodes]
+  );
+
+  const handleOpenNodeActions = useCallback(
+    (nodeId: string) => {
+      const targetNode = nodes.find((n) => n.id === nodeId);
+      if (!targetNode) return;
+
+      setActiveModalTarget({
+        type: 'node',
+        nodeId,
+        title: `Экшены при входе в реплику [${nodeId}]`,
+        conditions: [],
+        actions: targetNode.data.onEnterActions ? [...targetNode.data.onEnterActions] : [],
+      });
+    },
+    [nodes]
+  );
+
+  const handleSaveModalRules = useCallback(
+    (conditions: DialogueCondition[], actions: DialogueAction[]) => {
+      if (!activeModalTarget) return;
+
+      if (activeModalTarget.type === 'choice') {
+        const { nodeId, choiceId } = activeModalTarget;
+        setNodes((nds) => {
+          const next = nds.map((n) => {
+            if (n.id !== nodeId) return n;
+            const choices = (n.data.choices || []).map((c) =>
+              c.id === choiceId ? { ...c, conditions, actions } : c
+            );
+            return { ...n, data: { ...n.data, choices } };
+          });
+          saveCurrentGraph(next, edges);
+          return next;
+        });
+      } else {
+        const { nodeId } = activeModalTarget;
+        setNodes((nds) => {
+          const next = nds.map((n) => {
+            if (n.id !== nodeId) return n;
+            return {
+              ...n,
+              data: { ...n.data, onEnterActions: actions },
+            };
+          });
+          saveCurrentGraph(next, edges);
+          return next;
+        });
+      }
+    },
+    [activeModalTarget, edges, saveCurrentGraph]
+  );
+
   const enhancedNodes = useMemo(() => {
     return nodes.map((n) => ({
       ...n,
@@ -288,6 +370,8 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
         onAddChoice: () => handleAddChoice(n.id),
         onUpdateChoiceText: (cId: string, text: string) => handleUpdateChoiceText(n.id, cId, text),
         onDeleteChoice: (cId: string) => handleDeleteChoice(n.id, cId),
+        onOpenChoiceSettings: (cId: string) => handleOpenChoiceSettings(n.id, cId),
+        onOpenNodeActions: () => handleOpenNodeActions(n.id),
       },
     }));
   }, [
@@ -300,9 +384,10 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
     handleAddChoice,
     handleUpdateChoiceText,
     handleDeleteChoice,
+    handleOpenChoiceSettings,
+    handleOpenNodeActions,
   ]);
 
-  // Создание новой реплики в произвольной точке клика
   const handlePaneContextMenu = useCallback(
     (event: MouseEvent | React.MouseEvent) => {
       event.preventDefault();
@@ -343,7 +428,6 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
     [nodes.length, reactFlowInstance, saveCurrentGraph, edges]
   );
 
-  // Верхняя панель: действия
   const handleCreateDialogue = useCallback(() => {
     const newGraph = createEmptyDialogue();
     loadGraphIntoWorkspace(newGraph);
@@ -492,9 +576,20 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
             userSelect: 'none',
           }}
         >
-          ПКМ по пустому месту — добавить узел • Тяните точку ответа для соединения
+          ПКМ по пустому месту — добавить узел • ⚙️ — настроить условия и действия
         </div>
       </div>
+
+      {activeModalTarget && (
+        <RuleEditorModal
+          isOpen={true}
+          title={activeModalTarget.title}
+          conditions={activeModalTarget.conditions}
+          actions={activeModalTarget.actions}
+          onSave={handleSaveModalRules}
+          onClose={() => setActiveModalTarget(null)}
+        />
+      )}
     </div>
   );
 };

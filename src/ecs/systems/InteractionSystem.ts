@@ -426,6 +426,7 @@ export class InteractionSystem {
             }
 
             EventBus.emit('inventory:updated');
+            EventBus.emit('item:picked_up', { pickerId: id, itemId: targetId });
 
             const physBody = world.getComponent(targetId, 'physicsBody');
             if (physBody && physBody.bodyHandle !== undefined) {
