@@ -60,8 +60,40 @@ export class DialogueSystem {
     const graph = getDialogueGraph(dialogueId);
     if (!graph) return false;
 
-    const startNode = graph.nodes[graph.startNodeId];
-    if (!startNode) return false;
+    let targetNodeId: string | null = graph.startNodeId;
+    let targetNode = graph.nodes[targetNodeId];
+    if (!targetNode) return false;
+
+    const context: ActionExecutionContext = {
+      world,
+      app: this.app,
+      sourceEntityId: npcId,
+      activatorEntityId: playerId,
+    };
+
+    let hops = 0;
+    while (targetNode && targetNode.nodeType === 'branch' && hops < 10) {
+      hops++;
+      if (targetNode.onEnterActions) {
+        ActionDispatcher.executeAll(targetNode.onEnterActions, context);
+      }
+      let nextId: string | null = targetNode.defaultTargetNodeId ?? null;
+      for (const branchCase of targetNode.branchCases) {
+        if (ConditionEvaluator.evaluateAll(branchCase.conditions, context)) {
+          nextId = branchCase.targetNodeId;
+          break;
+        }
+      }
+      if (!nextId) {
+        return false;
+      }
+      targetNodeId = nextId;
+      targetNode = graph.nodes[targetNodeId];
+    }
+
+    if (!targetNode || targetNode.nodeType === 'branch') {
+      return false;
+    }
 
     const npcMeta = world.getComponent(npcId, 'meta');
     const npcName = npcMeta?.name || 'Собеседник';
@@ -71,11 +103,11 @@ export class DialogueSystem {
       playerId,
       dialogueId,
       graph,
-      currentNodeId: startNode.id,
+      currentNodeId: targetNode.id,
       history: [
         {
-          speaker: startNode.speakerName || npcName,
-          text: startNode.text,
+          speaker: targetNode.speakerName || npcName,
+          text: targetNode.text,
           timestamp: Date.now(),
           isPlayer: false,
         },
@@ -94,13 +126,7 @@ export class DialogueSystem {
       npcInput.moveStrafe = 0;
     }
 
-    const context: ActionExecutionContext = {
-      world,
-      app: this.app,
-      sourceEntityId: npcId,
-      activatorEntityId: playerId,
-    };
-    ActionDispatcher.executeAll(startNode.onEnterActions, context);
+    ActionDispatcher.executeAll(targetNode.onEnterActions, context);
     this.emitCurrentState(world);
     return true;
   }
@@ -108,9 +134,9 @@ export class DialogueSystem {
   public chooseOption(world: World, choiceId: string): void {
     if (!this.activeSession) return;
 
-    const { graph, currentNodeId, npcId, playerId } = this.activeSession;
+    const { graph, currentNodeId, npcId, playerId, dialogueId } = this.activeSession;
     const currentNode = graph.nodes[currentNodeId];
-    if (!currentNode) return;
+    if (!currentNode || currentNode.nodeType === 'branch') return;
 
     const choice = currentNode.choices.find((c) => c.id === choiceId);
     if (!choice) return;
@@ -135,7 +161,7 @@ export class DialogueSystem {
       isPlayer: true,
     });
 
-    // Применяем эффекты ответа игрока
+    // 1. Применяем эффекты ответа игрока СТРОГО ДО вычисления условий следующего перехода
     ActionDispatcher.executeAll(choice.actions, context);
 
     // Если выбор ведет в null — завершаем разговор
@@ -144,26 +170,53 @@ export class DialogueSystem {
       return;
     }
 
-    const nextNode = graph.nodes[choice.targetNodeId];
-    if (!nextNode) {
+    // 2. Транзитный обход узлов ветвления
+    let targetNodeId: string | null = choice.targetNodeId;
+    let targetNode = graph.nodes[targetNodeId];
+
+    let hops = 0;
+    while (targetNode && targetNode.nodeType === 'branch' && hops < 10) {
+      hops++;
+      if (targetNode.onEnterActions) {
+        ActionDispatcher.executeAll(targetNode.onEnterActions, context);
+      }
+      let nextId: string | null = targetNode.defaultTargetNodeId ?? null;
+      for (const branchCase of targetNode.branchCases) {
+        if (ConditionEvaluator.evaluateAll(branchCase.conditions, context)) {
+          nextId = branchCase.targetNodeId;
+          break;
+        }
+      }
+      if (!nextId) {
+        this.closeDialogue(world);
+        return;
+      }
+      targetNodeId = nextId;
+      targetNode = graph.nodes[targetNodeId];
+    }
+
+    if (hops >= 10 || !targetNode || targetNode.nodeType === 'branch') {
+      console.error(
+        `[DialogueSystem] Обнаружен цикл или невалидный узел ветвления в диалоге "${dialogueId}"`
+      );
       this.closeDialogue(world);
       return;
     }
 
-    this.activeSession.currentNodeId = nextNode.id;
+    this.activeSession.currentNodeId = targetNode.id;
 
     const npcMeta = world.getComponent(npcId, 'meta');
     const npcName = npcMeta?.name || 'Собеседник';
 
-    // Добавляем ответ NPC в историю
+    // 3. Добавляем ответ NPC в историю
     this.activeSession.history.push({
-      speaker: nextNode.speakerName || npcName,
-      text: nextNode.text,
+      speaker: targetNode.speakerName || npcName,
+      text: targetNode.text,
       timestamp: Date.now(),
       isPlayer: false,
     });
 
-    ActionDispatcher.executeAll(nextNode.onEnterActions, context);
+    ActionDispatcher.executeAll(targetNode.onEnterActions, context);
     this.emitCurrentState(world);
   }
 
@@ -183,7 +236,7 @@ export class DialogueSystem {
 
     const { npcId, dialogueId, currentNodeId, graph, history, playerId } = this.activeSession;
     const node = graph.nodes[currentNodeId];
-    if (!node) return null;
+    if (!node || node.nodeType === 'branch') return null;
 
     const npcMeta = world.getComponent(npcId, 'meta');
     const npcName = npcMeta?.name || 'Собеседник';
@@ -195,7 +248,7 @@ export class DialogueSystem {
       activatorEntityId: playerId,
     };
 
-    const availableChoices = node.choices
+    const availableChoices = (node.choices || [])
       .filter((choice) => ConditionEvaluator.evaluateAll(choice.conditions, context))
       .map((choice) => ({
         id: choice.id,

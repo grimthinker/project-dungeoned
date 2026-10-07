@@ -6,7 +6,15 @@ export type GameplayTargetSelector =
   'player' | 'activator' | 'source' | 'self' | 'speaker' | string;
 
 export type GameplayConditionType =
-  'flag_has' | 'flag_not' | 'flag_equals' | 'has_item' | 'is_alive' | 'stance_is' | 'stance_not';
+  | 'flag_has'
+  | 'flag_not'
+  | 'flag_equals'
+  | 'has_item'
+  | 'is_alive'
+  | 'stance_is'
+  | 'stance_not'
+  | 'quest_status'
+  | 'quest_stage';
 
 export interface GameplayCondition {
   type: GameplayConditionType;
@@ -22,7 +30,11 @@ export type GameplayActionType =
   | 'deal_damage'
   | 'spawn_entity'
   | 'give_item'
-  | 'end_dialogue';
+  | 'end_dialogue'
+  | 'start_quest'
+  | 'set_quest_stage'
+  | 'complete_quest'
+  | 'fail_quest';
 
 export interface GameplayAction {
   type: GameplayActionType;

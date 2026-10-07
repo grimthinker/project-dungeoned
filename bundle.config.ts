@@ -148,6 +148,19 @@ export const DOMAINS = {
     'src/ecs/components/zone.ts',
   ],
 
+  quest_system: [
+    'src/quest/**/*',
+    'src/components/questEditor/**/*',
+    'src/components/gameHud/BlockQuests.tsx',
+    'src/components/gameHud/BlockLog.tsx',
+    'src/components/gameHud/hudPorts.ts',
+    'src/HudAdapter.ts',
+    'src/gameplay/**/*',
+    'src/dialogue/StoryFlagsManager.ts',
+    'src/ecs/services/DeathService.ts',
+    'src/core/GameSimulation.ts',
+  ],
+
   // Визуальный нодовый редактор диалогов (@xyflow/react)
   dialogue_editor: [
     'src/dialogue/**/*',

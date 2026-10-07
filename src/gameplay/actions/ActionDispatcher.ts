@@ -149,3 +149,35 @@ ActionDispatcher.register('end_dialogue', (_, ctx) => {
     ctx.app.simulation.dialogueSystem.closeDialogue(ctx.world);
   }
 });
+
+// 8. Запуск квеста
+ActionDispatcher.register('start_quest', (action, ctx) => {
+  const questId = action.payload?.questId;
+  if (questId && ctx.app) {
+    ctx.app.simulation.questManager.startQuest(questId);
+  }
+});
+
+// 9. Переход на этап квеста
+ActionDispatcher.register('set_quest_stage', (action, ctx) => {
+  const { questId, stageId } = action.payload || {};
+  if (questId && stageId && ctx.app) {
+    ctx.app.simulation.questManager.setStage(questId, stageId);
+  }
+});
+
+// 10. Завершение квеста
+ActionDispatcher.register('complete_quest', (action, ctx) => {
+  const questId = action.payload?.questId;
+  if (questId && ctx.app) {
+    ctx.app.simulation.questManager.completeQuest(questId);
+  }
+});
+
+// 11. Провал квеста
+ActionDispatcher.register('fail_quest', (action, ctx) => {
+  const { questId, reason } = action.payload || {};
+  if (questId && ctx.app) {
+    ctx.app.simulation.questManager.failQuest(questId, reason);
+  }
+});

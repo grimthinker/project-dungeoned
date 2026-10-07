@@ -41,12 +41,33 @@ export interface EventMap {
   'zone:entered': { zoneId: string; entityId: string };
   'zone:exited': { zoneId: string; entityId: string };
   'item:picked_up': { pickerId: string; itemId: string };
+  'entity:died': { entityId: string; killerId?: string; archetype?: string; name?: string };
+  'story:flag-changed': { key: string; value: any };
   'dialogue:state-changed': ActiveDialogueDTO;
   'dialogue:closed': void;
   'dialogue:registry-updated': void;
   'dialogue:open-editor': { dialogueId?: string };
   'reading:state-changed': ActiveReadingDTO;
   'reading:closed': void;
+  'quest:started': { questId: string };
+  'quest:stage-changed': { questId: string; fromStageId: string; toStageId: string };
+  'quest:objective-updated': {
+    questId: string;
+    stageId: string;
+    objectiveId: string;
+    current: number;
+    max: number;
+  };
+  'quest:completed': { questId: string };
+  'quest:failed': { questId: string; reason?: string };
+  'quest:tracking-changed': { questId: string; isTracking: boolean };
+  'quest:registry-updated': void;
+  'quest:open-editor': { questId?: string };
+  'log:entry': {
+    text: string;
+    type: 'quest' | 'dialogue' | 'combat' | 'system';
+    timestamp: number;
+  };
 }
 
 type EventCallback<T> = (data: T) => void;

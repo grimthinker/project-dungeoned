@@ -2,6 +2,99 @@ import { DialogueGraph } from './types';
 import { EventBus } from '../core/EventBus';
 
 export const INITIAL_DIALOGUES: Record<string, DialogueGraph> = {
+  branching_test_dialogue: {
+    id: 'branching_test_dialogue',
+    title: 'Тест ветвления (Стражник)',
+    startNodeId: 'node_start',
+    nodes: {
+      node_start: {
+        id: 'node_start',
+        nodeType: 'text',
+        speaker: 'npc',
+        speakerName: 'Стражник',
+        text: 'Стой! Проход только по пропускам или за звонкую монету. Что у тебя есть?',
+        editorPosition: { x: 80, y: 160 },
+        choices: [
+          {
+            id: 'choice_inspect_me',
+            text: 'Проверь мои карманы и грамоту.',
+            targetNodeId: 'branch_guard_check',
+          },
+          {
+            id: 'choice_leave',
+            text: 'У меня ничего нет, я ухожу.',
+            targetNodeId: null,
+          },
+        ],
+      },
+      branch_guard_check: {
+        id: 'branch_guard_check',
+        nodeType: 'branch',
+        name: 'Проверка пропуска / золота',
+        editorPosition: { x: 480, y: 130 },
+        branchCases: [
+          {
+            id: 'case_has_pass',
+            name: 'Есть пропуск',
+            conditions: [{ type: 'flag_has', key: 'has_castle_pass' }],
+            targetNodeId: 'node_pass_success',
+          },
+          {
+            id: 'case_has_gold',
+            name: 'Есть монета',
+            conditions: [{ type: 'flag_has', key: 'has_gold_coin' }],
+            targetNodeId: 'node_bribe_success',
+          },
+        ],
+        defaultTargetNodeId: 'node_check_failed',
+      },
+      node_pass_success: {
+        id: 'node_pass_success',
+        nodeType: 'text',
+        speaker: 'npc',
+        speakerName: 'Стражник',
+        text: 'О, королевская грамота! Проходи, почтенный путник, ворота открыты.',
+        editorPosition: { x: 880, y: 30 },
+        choices: [
+          {
+            id: 'choice_enter',
+            text: 'Благодарю за службу.',
+            targetNodeId: null,
+          },
+        ],
+      },
+      node_bribe_success: {
+        id: 'node_bribe_success',
+        nodeType: 'text',
+        speaker: 'npc',
+        speakerName: 'Стражник',
+        text: 'Хм, золото настоящее... Ладно, на этот раз проходи, но не попадайся капитану на глаза.',
+        editorPosition: { x: 880, y: 200 },
+        choices: [
+          {
+            id: 'choice_bribe_enter',
+            text: 'Договорились. (Пройти в ворота)',
+            targetNodeId: null,
+          },
+        ],
+      },
+      node_check_failed: {
+        id: 'node_check_failed',
+        nodeType: 'text',
+        speaker: 'npc',
+        speakerName: 'Стражник',
+        text: 'У тебя ни гроша в кармане и никакой грамоты! Проваливай, пока я не позвал караул!',
+        editorPosition: { x: 880, y: 370 },
+        choices: [
+          {
+            id: 'choice_apology_leave',
+            text: 'Прошу прощения, ухожу.',
+            targetNodeId: null,
+          },
+        ],
+      },
+    },
+  },
   dog_bark_dialogue: {
     id: 'dog_bark_dialogue',
     title: 'Собака',

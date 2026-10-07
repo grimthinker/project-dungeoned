@@ -3,6 +3,8 @@ import { GameApp } from './GameApp';
 import {
   IHudDataProvider,
   PlayerStatusDTO,
+  QuestItemDTO,
+  LogEntryDTO,
   PlayerEquipmentDTO,
   MapSnapshotDTO,
   TargetPanelDTO,
@@ -24,6 +26,7 @@ import {
   calculateTotalEntityWeight,
 } from './ecs/utils/hierarchy';
 import { HUD_CONFIG } from './config/hudConfig';
+import { getQuestGraph } from './quest/questRegistry';
 
 function getFpColor(currentFp: number, maxFp: number): string {
   if (maxFp <= 0) return HUD_CONFIG.status.paperDoll.fpIntact;
@@ -46,11 +49,19 @@ function getFpColor(currentFp: number, maxFp: number): string {
 
 export class HudAdapter implements IHudDataProvider {
   private activeReading: ActiveReadingDTO | null = null;
+  private logEntries: LogEntryDTO[] = [];
 
   constructor(
     private world: World,
     private app: GameApp
-  ) {}
+  ) {
+    EventBus.on('log:entry', (entry) => {
+      this.logEntries.push(entry);
+      if (this.logEntries.length > 100) {
+        this.logEntries.shift();
+      }
+    });
+  }
 
   public getPlayerStatus(playerId: string | null): PlayerStatusDTO | null {
     if (!playerId) return null;
@@ -331,6 +342,8 @@ export class HudAdapter implements IHudDataProvider {
       }
     }
 
+    const questMarkers = this.app.simulation.questManager.getActiveWaypoints();
+
     return {
       terrain: terrainComp
         ? {
@@ -348,6 +361,7 @@ export class HudAdapter implements IHudDataProvider {
       zones,
       creatures,
       playerPos,
+      questMarkers,
     };
   }
 
@@ -692,5 +706,55 @@ export class HudAdapter implements IHudDataProvider {
 
   public getActiveDialogue(): import('./components/gameHud/hudPorts').ActiveDialogueDTO | null {
     return this.app.simulation.dialogueSystem.getActiveDialogueDTO(this.world);
+  }
+
+  public getQuests(): QuestItemDTO[] {
+    const rawList = this.app.simulation.questManager.getAllQuestsList();
+    const result: QuestItemDTO[] = [];
+
+    for (const qState of rawList) {
+      if (qState.status === 'hidden') continue;
+      const graph = getQuestGraph(qState.questId);
+      if (!graph) continue;
+
+      const stage = graph.stages[qState.currentStageId];
+      const objectives = (stage?.objectives || []).map((o) => {
+        const p = qState.objectiveProgress[o.id] || { current: 0, completed: false };
+        return {
+          id: o.id,
+          title: o.title,
+          current: p.current,
+          required: o.requiredCount ?? 1,
+          isCompleted: p.completed,
+          isOptional: Boolean(o.isOptional),
+          isHidden: Boolean(o.isHidden),
+        };
+      });
+
+      result.push({
+        id: qState.questId,
+        title: graph.title,
+        description: graph.description || '',
+        status: qState.status as 'active' | 'completed' | 'failed',
+        isTracking: qState.isTracking,
+        currentStageTitle: stage?.title || 'Завершено',
+        currentStageDescription: stage?.description || '',
+        objectives,
+      });
+    }
+
+    return result;
+  }
+
+  public getTrackedQuestId(): string | null {
+    return this.app.simulation.questManager.getTrackedQuestId();
+  }
+
+  public trackQuest(questId: string, isTracking: boolean): void {
+    this.app.simulation.questManager.trackQuest(questId, isTracking);
+  }
+
+  public getLogEntries(): LogEntryDTO[] {
+    return [...this.logEntries];
   }
 }

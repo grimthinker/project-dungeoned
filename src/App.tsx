@@ -18,6 +18,7 @@ import { HotkeysModal } from './components/HotkeysModal';
 import { CreatureWizardModal, NewWorldModal, SettingsModal } from './components/modals';
 import { GameHUD } from './components/GameHUD';
 import { DialogueEditorWorkspace } from './components/dialogueEditor/DialogueEditorWorkspace';
+import { QuestEditorWorkspace } from './components/questEditor/QuestEditorWorkspace';
 import { BodyStructureType } from './ecs/templates';
 import { ModularPlacementOptions } from './types';
 import { CanvasHUD } from './components/CanvasHUD';
@@ -95,6 +96,7 @@ export const App: React.FC = () => {
   const [isNewWorldModalOpen, setIsNewWorldModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeDialogueEditorId, setActiveDialogueEditorId] = useState<string | null>(null);
+  const [activeQuestEditorId, setActiveQuestEditorId] = useState<string | null>(null);
 
   const { setApp } = useDragDrop();
 
@@ -163,6 +165,10 @@ export const App: React.FC = () => {
       setActiveDialogueEditorId(dialogueId || 'default_npc_dialogue');
     });
 
+    const unsubOpenQuest = EventBus.on('quest:open-editor', ({ questId }) => {
+      setActiveQuestEditorId(questId || 'fetch_dog_quest');
+    });
+
     return () => {
       unsubState();
       unsubSelection();
@@ -170,6 +176,7 @@ export const App: React.FC = () => {
       unsubPlayerDied();
       unsubWorld();
       unsubOpenDialogue();
+      unsubOpenQuest();
     };
   }, [syncPlayerControls]);
 
@@ -773,6 +780,13 @@ export const App: React.FC = () => {
         <DialogueEditorWorkspace
           initialDialogueId={activeDialogueEditorId}
           onClose={() => setActiveDialogueEditorId(null)}
+        />
+      )}
+
+      {activeQuestEditorId && (
+        <QuestEditorWorkspace
+          initialQuestId={activeQuestEditorId}
+          onClose={() => setActiveQuestEditorId(null)}
         />
       )}
 

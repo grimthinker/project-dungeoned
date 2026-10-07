@@ -19,15 +19,38 @@ export interface DialogueChoice {
   actions?: DialogueAction[];
 }
 
-export interface DialogueNode {
+export interface BranchCase {
   id: string;
+  name?: string;
+  conditions: DialogueCondition[];
+  targetNodeId: string | null;
+}
+
+export interface DialogueTextNode {
+  id: string;
+  nodeType?: 'text';
   speaker?: 'npc' | 'player';
   speakerName?: string;
   text: string;
   choices: DialogueChoice[];
   onEnterActions?: DialogueAction[];
-  /** Координаты узла для визуального редактора диалогов */
   editorPosition?: { x: number; y: number };
+}
+
+export interface DialogueBranchNode {
+  id: string;
+  nodeType: 'branch';
+  name?: string;
+  branchCases: BranchCase[];
+  defaultTargetNodeId: string | null;
+  onEnterActions?: DialogueAction[];
+  editorPosition?: { x: number; y: number };
+}
+
+export type DialogueNode = DialogueTextNode | DialogueBranchNode;
+
+export function isBranchNode(node: DialogueNode | undefined): node is DialogueBranchNode {
+  return node?.nodeType === 'branch';
 }
 
 export interface DialogueGraph {

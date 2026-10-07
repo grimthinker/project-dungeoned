@@ -222,7 +222,11 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       />
 
       {/* Блок А: Активные квесты (средний левый край) */}
-      <BlockQuests isOpen={isQuestsOpen} onClose={() => setIsQuestsOpen(false)} />
+      <BlockQuests
+        isOpen={isQuestsOpen}
+        onClose={() => setIsQuestsOpen(false)}
+        hudProvider={hudProvider}
+      />
 
       {/* Блок Б: Слоты взаимодействия и области экипировки (центр снизу) */}
       <BlockEquipment hudProvider={hudProvider} playerId={playerId} />
@@ -274,7 +278,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       ))}
 
       {/* Блок В: Журнал сообщений и диалогов (нижний правый угол) */}
-      <BlockLog isOpen={isLogOpen} onClose={() => setIsLogOpen(false)} />
+      <BlockLog isOpen={isLogOpen} onClose={() => setIsLogOpen(false)} hudProvider={hudProvider} />
 
       {/* Блок Г: Панель управляющих кнопок [H], [J], [M], [Esc] (нижний левый угол) */}
       <BlockToolbar

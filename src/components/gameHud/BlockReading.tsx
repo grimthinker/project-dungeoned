@@ -186,7 +186,7 @@ export const BlockReading: React.FC<BlockReadingProps> = ({
           }}
           onClick={onClose}
         >
-          [Закончить чтение]
+          [Закрыть]
         </button>
       </div>
     </RetroWindow>

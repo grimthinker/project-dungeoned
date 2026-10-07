@@ -1,37 +1,35 @@
 import React, { useRef } from 'react';
-import { DialogueGraph } from '../../dialogue/types';
+import { QuestGraph } from '../../quest/types';
 
-export interface DialogueEditorTopBarProps {
-  currentDialogue: DialogueGraph;
-  allDialogues: Array<{ id: string; title: string }>;
-  onSelectDialogue: (id: string) => void;
-  onCreateDialogue: () => void;
-  onAddTextNode?: () => void;
-  onAddBranchNode?: () => void;
+export interface QuestEditorTopBarProps {
+  currentQuest: QuestGraph;
+  allQuests: Array<{ id: string; title: string }>;
+  onSelectQuest: (id: string) => void;
+  onCreateQuest: () => void;
   onUpdateTitle: (title: string) => void;
+  onUpdateDescription: (description: string) => void;
+  onToggleRepeatable: (isRepeatable: boolean) => void;
   onExport: () => void;
   onImport: (file: File) => void;
   onDelete: () => void;
   onClose: () => void;
 }
 
-export const DialogueEditorTopBar: React.FC<DialogueEditorTopBarProps> = ({
-  currentDialogue,
-  allDialogues,
-  onSelectDialogue,
-  onCreateDialogue,
-  onAddTextNode,
-  onAddBranchNode,
+export const QuestEditorTopBar: React.FC<QuestEditorTopBarProps> = ({
+  currentQuest,
+  allQuests,
+  onSelectQuest,
+  onCreateQuest,
   onUpdateTitle,
+  onUpdateDescription,
+  onToggleRepeatable,
   onExport,
   onImport,
   onDelete,
   onClose,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  const isSystemDialogue =
-    currentDialogue.id === 'default_npc_dialogue' || currentDialogue.id === 'dog_bark_dialogue';
+  const isSystemQuest = currentQuest.id === 'fetch_dog_quest';
 
   return (
     <div
@@ -50,13 +48,11 @@ export const DialogueEditorTopBar: React.FC<DialogueEditorTopBarProps> = ({
         userSelect: 'none',
       }}
     >
-      {/* Левая секция: Выбор и создание диалогов */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontSize: 18, marginRight: 2 }}>💬</span>
-
+        <span style={{ fontSize: 18 }}>📜</span>
         <select
-          value={currentDialogue.id}
-          onChange={(e) => onSelectDialogue(e.target.value)}
+          value={currentQuest.id}
+          onChange={(e) => onSelectQuest(e.target.value)}
           style={{
             backgroundColor: '#111',
             color: '#fff',
@@ -69,16 +65,16 @@ export const DialogueEditorTopBar: React.FC<DialogueEditorTopBarProps> = ({
             maxWidth: 240,
           }}
         >
-          {allDialogues.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.title} ({d.id})
+          {allQuests.map((q) => (
+            <option key={q.id} value={q.id}>
+              {q.title} ({q.id})
             </option>
           ))}
         </select>
 
         <button
           type="button"
-          onClick={onCreateDialogue}
+          onClick={onCreateQuest}
           style={{
             backgroundColor: '#27ae60',
             color: '#fff',
@@ -89,72 +85,47 @@ export const DialogueEditorTopBar: React.FC<DialogueEditorTopBarProps> = ({
             fontWeight: 'bold',
             cursor: 'pointer',
           }}
-          title="Создать новый граф диалога"
+          title="Создать новый квест"
         >
-          + Новый диалог
+          + Новый квест
         </button>
-
-        {onAddTextNode && (
-          <button
-            type="button"
-            onClick={onAddTextNode}
-            style={{
-              backgroundColor: '#2980b9',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 4,
-              padding: '6px 10px',
-              fontSize: 12,
-              fontWeight: 'bold',
-              cursor: 'pointer',
-            }}
-            title="Добавить узел реплики"
-          >
-            💬 + Реплика
-          </button>
-        )}
-
-        {onAddBranchNode && (
-          <button
-            type="button"
-            onClick={onAddBranchNode}
-            style={{
-              backgroundColor: '#8e44ad',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 4,
-              padding: '6px 10px',
-              fontSize: 12,
-              fontWeight: 'bold',
-              cursor: 'pointer',
-            }}
-            title="Добавить узел ветвления условий"
-          >
-            🔀 + Ветвление
-          </button>
-        )}
       </div>
 
-      {/* Центральная секция: Редактирование названия */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, maxWidth: 420 }}>
-        <span style={{ fontSize: 11, color: '#888', whiteSpace: 'nowrap' }}>Название:</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, maxWidth: 440 }}>
         <input
           type="text"
-          value={currentDialogue.title}
+          value={currentQuest.title}
           onChange={(e) => onUpdateTitle(e.target.value)}
           style={{
             flex: 1,
             backgroundColor: '#111',
             border: '1px solid #444',
             borderRadius: 4,
-            color: '#2ecc71',
+            color: '#f1c40f',
             fontWeight: 'bold',
             padding: '6px 10px',
             fontSize: 13,
             outline: 'none',
           }}
-          placeholder="Название диалога"
+          placeholder="Название квеста"
         />
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 11,
+            color: '#aaa',
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={Boolean(currentQuest.isRepeatable)}
+            onChange={(e) => onToggleRepeatable(e.target.checked)}
+          />
+          Повторяемый
+        </label>
         <span
           style={{
             fontSize: 10,
@@ -165,13 +136,11 @@ export const DialogueEditorTopBar: React.FC<DialogueEditorTopBarProps> = ({
             borderRadius: 3,
             whiteSpace: 'nowrap',
           }}
-          title={`Идентификатор графа: ${currentDialogue.id}`}
         >
-          ID: {currentDialogue.id}
+          ID: {currentQuest.id}
         </span>
       </div>
 
-      {/* Правая секция: Экспорт, Импорт, Удаление и Закрытие */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <button
           type="button"
@@ -185,11 +154,9 @@ export const DialogueEditorTopBar: React.FC<DialogueEditorTopBarProps> = ({
             fontSize: 12,
             cursor: 'pointer',
           }}
-          title="Сохранить текущий диалог в отдельный .json файл"
         >
           💾 Экспорт
         </button>
-
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
@@ -202,7 +169,6 @@ export const DialogueEditorTopBar: React.FC<DialogueEditorTopBarProps> = ({
             fontSize: 12,
             cursor: 'pointer',
           }}
-          title="Загрузить диалог из .json файла"
         >
           📂 Импорт
         </button>
@@ -218,7 +184,7 @@ export const DialogueEditorTopBar: React.FC<DialogueEditorTopBarProps> = ({
           }}
         />
 
-        {!isSystemDialogue && (
+        {!isSystemQuest && (
           <button
             type="button"
             onClick={onDelete}
@@ -231,7 +197,6 @@ export const DialogueEditorTopBar: React.FC<DialogueEditorTopBarProps> = ({
               fontSize: 12,
               cursor: 'pointer',
             }}
-            title="Удалить данный диалог"
           >
             🗑️
           </button>
@@ -251,7 +216,6 @@ export const DialogueEditorTopBar: React.FC<DialogueEditorTopBarProps> = ({
             cursor: 'pointer',
             marginLeft: 6,
           }}
-          title="Вернуться к 3D-сцене"
         >
           ✕ Закрыть
         </button>

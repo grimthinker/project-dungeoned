@@ -140,6 +140,15 @@ export class DeathService {
     if (aiStats?.behavior.current === 'PlayerTree') {
       EventBus.emit('game:playerDied');
     }
+
+    // 10. Оповещение подсистем мира и квестов о гибели сущности
+    const entTag = world.getComponent(id, 'tag');
+    const entMeta = world.getComponent(id, 'meta');
+    EventBus.emit('entity:died', {
+      entityId: id,
+      archetype: entTag?.archetype,
+      name: entMeta?.name || id,
+    });
   }
 
   /**

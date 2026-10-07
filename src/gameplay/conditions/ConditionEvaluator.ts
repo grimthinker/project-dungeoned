@@ -88,3 +88,19 @@ ConditionEvaluator.register('stance_not', (cond, ctx) => {
   const meta = ctx.world.getComponent(targetId, 'meta');
   return meta?.stance !== cond.value;
 });
+
+// 8. Проверка статуса квеста (not_started, active, completed, failed)
+ConditionEvaluator.register('quest_status', (cond, ctx) => {
+  if (!ctx.app) return false;
+  const state = ctx.app.simulation.questManager.getQuestState(cond.key);
+  const currentStatus = state?.status || 'not_started';
+  return currentStatus === cond.value;
+});
+
+// 9. Проверка текущей стадии квеста
+ConditionEvaluator.register('quest_stage', (cond, ctx) => {
+  if (!ctx.app) return false;
+  const state = ctx.app.simulation.questManager.getQuestState(cond.key);
+  if (!state || state.status !== 'active') return false;
+  return state.currentStageId === cond.value;
+});

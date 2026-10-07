@@ -39,11 +39,13 @@ import {
   importDialogueFromJson,
 } from '../../dialogue/dialogueRegistry';
 import { DialogueNodeComponent } from './DialogueNodeComponent';
+import { DialogueBranchNodeComponent } from './DialogueBranchNodeComponent';
 import { DialogueEditorTopBar } from './DialogueEditorTopBar';
 import { RuleEditorModal } from '../gameplayEditor/RuleEditorModal';
 
 const nodeTypes = {
   dialogueNode: DialogueNodeComponent,
+  branchNode: DialogueBranchNodeComponent,
 };
 
 interface InnerWorkspaceProps {
@@ -52,9 +54,10 @@ interface InnerWorkspaceProps {
 }
 
 interface ModalTargetState {
-  type: 'choice' | 'node';
+  type: 'choice' | 'node' | 'branchCase';
   nodeId: string;
   choiceId?: string;
+  caseId?: string;
   title: string;
   conditions: DialogueCondition[];
   actions: DialogueAction[];
@@ -72,6 +75,11 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
   const [edges, setEdges] = useState<Edge[]>([]);
 
   const [activeModalTarget, setActiveModalTarget] = useState<ModalTargetState | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    flowPos: { x: number; y: number };
+  } | null>(null);
 
   const reactFlowInstance = useReactFlow();
   const reactFlowWrapper = useRef<HTMLDivElement | null>(null);
@@ -131,7 +139,40 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
     (changes: EdgeChange[]) => {
       setEdges((eds) => {
         const next = applyEdgeChanges(changes, eds);
-        saveCurrentGraph(nodes, next);
+
+        const removedEdges = eds.filter((oldE) => !next.some((newE) => newE.id === oldE.id));
+        if (removedEdges.length > 0) {
+          setNodes((nds) => {
+            let updatedNds = [...nds];
+            for (const remEdge of removedEdges) {
+              const srcId = remEdge.source;
+              const handle = remEdge.sourceHandle;
+
+              updatedNds = updatedNds.map((n) => {
+                if (n.id !== srcId) return n;
+                if (n.data.nodeType === 'branch' || n.type === 'branchNode') {
+                  if (handle === 'default-case') {
+                    return { ...n, data: { ...n.data, defaultTargetNodeId: null } };
+                  }
+                  const cases = (n.data.branchCases || []).map((c) =>
+                    c.id === handle ? { ...c, targetNodeId: null } : c
+                  );
+                  return { ...n, data: { ...n.data, branchCases: cases } };
+                } else {
+                  const choices = (n.data.choices || []).map((c) =>
+                    c.id === handle ? { ...c, targetNodeId: null } : c
+                  );
+                  return { ...n, data: { ...n.data, choices } };
+                }
+              });
+            }
+            saveCurrentGraph(updatedNds, next);
+            return updatedNds;
+          });
+        } else {
+          saveCurrentGraph(nodes, next);
+        }
+
         return next;
       });
     },
@@ -140,24 +181,60 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
 
   const onConnect = useCallback(
     (connection: Connection) => {
+      const targetId = connection.target;
+      const sourceId = connection.source;
+      const handle = connection.sourceHandle;
+
       setEdges((eds) => {
         const filtered = eds.filter(
           (e) => !(e.source === connection.source && e.sourceHandle === connection.sourceHandle)
         );
+        const isBranchSource =
+          connection.sourceHandle?.startsWith('case_') ||
+          connection.sourceHandle === 'default-case';
+        const strokeColor =
+          connection.sourceHandle === 'default-case'
+            ? '#f39c12'
+            : isBranchSource
+              ? '#9b59b6'
+              : '#3498db';
+
         const next = addEdge(
           {
             ...connection,
             type: 'smoothstep',
             animated: false,
-            style: { stroke: '#3498db', strokeWidth: 2 },
+            style: { stroke: strokeColor, strokeWidth: 2 },
           },
           filtered
         );
-        saveCurrentGraph(nodes, next);
+
+        setNodes((nds) => {
+          const nextNodes = nds.map((n) => {
+            if (n.id !== sourceId) return n;
+            if (n.data.nodeType === 'branch' || n.type === 'branchNode') {
+              if (handle === 'default-case') {
+                return { ...n, data: { ...n.data, defaultTargetNodeId: targetId } };
+              }
+              const cases = (n.data.branchCases || []).map((c) =>
+                c.id === handle ? { ...c, targetNodeId: targetId } : c
+              );
+              return { ...n, data: { ...n.data, branchCases: cases } };
+            } else {
+              const choices = (n.data.choices || []).map((c) =>
+                c.id === handle ? { ...c, targetNodeId: targetId } : c
+              );
+              return { ...n, data: { ...n.data, choices } };
+            }
+          });
+          saveCurrentGraph(nextNodes, next);
+          return nextNodes;
+        });
+
         return next;
       });
     },
-    [nodes, saveCurrentGraph]
+    [saveCurrentGraph]
   );
 
   const handleUpdateNodeText = useCallback(
@@ -314,9 +391,107 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
       setActiveModalTarget({
         type: 'node',
         nodeId,
-        title: `Экшены при входе в реплику [${nodeId}]`,
+        title: `Экшены при входе в узел [${nodeId}]`,
         conditions: [],
         actions: targetNode.data.onEnterActions ? [...targetNode.data.onEnterActions] : [],
+      });
+    },
+    [nodes]
+  );
+
+  const handleUpdateBranchName = useCallback(
+    (nodeId: string, name: string) => {
+      setNodes((nds) => {
+        const next = nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, name } } : n));
+        saveCurrentGraph(next, edges);
+        return next;
+      });
+    },
+    [edges, saveCurrentGraph]
+  );
+
+  const handleAddBranchCase = useCallback(
+    (nodeId: string) => {
+      const caseId = `case_${Date.now().toString(36).substring(2, 6)}`;
+      setNodes((nds) => {
+        const next = nds.map((n) => {
+          if (n.id !== nodeId) return n;
+          const currentCases = n.data.branchCases || [];
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              branchCases: [
+                ...currentCases,
+                {
+                  id: caseId,
+                  name: `Ветка ${currentCases.length + 1}`,
+                  conditions: [],
+                  targetNodeId: null,
+                },
+              ],
+            },
+          };
+        });
+        saveCurrentGraph(next, edges);
+        return next;
+      });
+    },
+    [edges, saveCurrentGraph]
+  );
+
+  const handleUpdateBranchCaseName = useCallback(
+    (nodeId: string, caseId: string, name: string) => {
+      setNodes((nds) => {
+        const next = nds.map((n) => {
+          if (n.id !== nodeId) return n;
+          const cases = (n.data.branchCases || []).map((c) =>
+            c.id === caseId ? { ...c, name } : c
+          );
+          return { ...n, data: { ...n.data, branchCases: cases } };
+        });
+        saveCurrentGraph(next, edges);
+        return next;
+      });
+    },
+    [edges, saveCurrentGraph]
+  );
+
+  const handleDeleteBranchCase = useCallback(
+    (nodeId: string, caseId: string) => {
+      setNodes((nds) => {
+        const nextNodes = nds.map((n) => {
+          if (n.id !== nodeId) return n;
+          const cases = (n.data.branchCases || []).filter((c) => c.id !== caseId);
+          return { ...n, data: { ...n.data, branchCases: cases } };
+        });
+
+        setEdges((eds) => {
+          const nextEdges = eds.filter((e) => !(e.source === nodeId && e.sourceHandle === caseId));
+          saveCurrentGraph(nextNodes, nextEdges);
+          return nextEdges;
+        });
+
+        return nextNodes;
+      });
+    },
+    [saveCurrentGraph]
+  );
+
+  const handleOpenBranchCaseConditions = useCallback(
+    (nodeId: string, caseId: string) => {
+      const targetNode = nodes.find((n) => n.id === nodeId);
+      if (!targetNode) return;
+      const targetCase = targetNode.data.branchCases?.find((c) => c.id === caseId);
+      if (!targetCase) return;
+
+      setActiveModalTarget({
+        type: 'branchCase',
+        nodeId,
+        caseId,
+        title: `Условия ветвления: "${targetCase.name || caseId}"`,
+        conditions: targetCase.conditions ? [...targetCase.conditions] : [],
+        actions: [],
       });
     },
     [nodes]
@@ -335,6 +510,19 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
               c.id === choiceId ? { ...c, conditions, actions } : c
             );
             return { ...n, data: { ...n.data, choices } };
+          });
+          saveCurrentGraph(next, edges);
+          return next;
+        });
+      } else if (activeModalTarget.type === 'branchCase') {
+        const { nodeId, caseId } = activeModalTarget;
+        setNodes((nds) => {
+          const next = nds.map((n) => {
+            if (n.id !== nodeId) return n;
+            const cases = (n.data.branchCases || []).map((c) =>
+              c.id === caseId ? { ...c, conditions } : c
+            );
+            return { ...n, data: { ...n.data, branchCases: cases } };
           });
           saveCurrentGraph(next, edges);
           return next;
@@ -372,6 +560,12 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
         onDeleteChoice: (cId: string) => handleDeleteChoice(n.id, cId),
         onOpenChoiceSettings: (cId: string) => handleOpenChoiceSettings(n.id, cId),
         onOpenNodeActions: () => handleOpenNodeActions(n.id),
+        onUpdateBranchName: (name: string) => handleUpdateBranchName(n.id, name),
+        onAddBranchCase: () => handleAddBranchCase(n.id),
+        onUpdateBranchCaseName: (cId: string, name: string) =>
+          handleUpdateBranchCaseName(n.id, cId, name),
+        onDeleteBranchCase: (cId: string) => handleDeleteBranchCase(n.id, cId),
+        onOpenBranchCaseConditions: (cId: string) => handleOpenBranchCaseConditions(n.id, cId),
       },
     }));
   }, [
@@ -386,18 +580,21 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
     handleDeleteChoice,
     handleOpenChoiceSettings,
     handleOpenNodeActions,
+    handleUpdateBranchName,
+    handleAddBranchCase,
+    handleUpdateBranchCaseName,
+    handleDeleteBranchCase,
+    handleOpenBranchCaseConditions,
   ]);
 
-  const handlePaneContextMenu = useCallback(
-    (event: MouseEvent | React.MouseEvent) => {
-      event.preventDefault();
-      const bounds = reactFlowWrapper.current?.getBoundingClientRect();
-      if (!bounds) return;
-
-      const position = reactFlowInstance.screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY,
-      });
+  const handleAddTextNode = useCallback(
+    (pos?: { x: number; y: number }) => {
+      const position =
+        pos ||
+        reactFlowInstance.screenToFlowPosition({
+          x: window.innerWidth / 2 - 160,
+          y: window.innerHeight / 2 - 100,
+        });
 
       const newNodeId = `node_${Date.now().toString(36).substring(2, 6)}`;
       const newNode: Node<DialogueNodeData> = {
@@ -406,6 +603,7 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
         position,
         data: {
           nodeId: newNodeId,
+          nodeType: 'text',
           speaker: 'npc',
           text: 'Новая реплика',
           isStartNode: nodes.length === 0,
@@ -426,6 +624,63 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
       });
     },
     [nodes.length, reactFlowInstance, saveCurrentGraph, edges]
+  );
+
+  const handleAddBranchNode = useCallback(
+    (pos?: { x: number; y: number }) => {
+      const position =
+        pos ||
+        reactFlowInstance.screenToFlowPosition({
+          x: window.innerWidth / 2 - 160,
+          y: window.innerHeight / 2 - 100,
+        });
+
+      const newBranchId = `branch_${Date.now().toString(36).substring(2, 6)}`;
+      const newCaseId = `case_${Date.now().toString(36).substring(2, 6)}`;
+      const newNode: Node<DialogueNodeData> = {
+        id: newBranchId,
+        type: 'branchNode',
+        position,
+        data: {
+          nodeId: newBranchId,
+          nodeType: 'branch',
+          name: 'Ветвление',
+          isStartNode: nodes.length === 0,
+          branchCases: [
+            {
+              id: newCaseId,
+              name: 'Ветка 1',
+              conditions: [],
+              targetNodeId: null,
+            },
+          ],
+          defaultTargetNodeId: null,
+        },
+      };
+
+      setNodes((nds) => {
+        const next = [...nds, newNode];
+        saveCurrentGraph(next, edges);
+        return next;
+      });
+    },
+    [nodes.length, reactFlowInstance, saveCurrentGraph, edges]
+  );
+
+  const handlePaneContextMenu = useCallback(
+    (event: MouseEvent | React.MouseEvent) => {
+      event.preventDefault();
+      const position = reactFlowInstance.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+      setContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        flowPos: position,
+      });
+    },
+    [reactFlowInstance]
   );
 
   const handleCreateDialogue = useCallback(() => {
@@ -517,6 +772,8 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
         allDialogues={getAllDialogues()}
         onSelectDialogue={setCurrentId}
         onCreateDialogue={handleCreateDialogue}
+        onAddTextNode={() => handleAddTextNode()}
+        onAddBranchNode={() => handleAddBranchNode()}
         onUpdateTitle={handleUpdateTitle}
         onExport={handleExport}
         onImport={handleImport}
@@ -524,7 +781,7 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
         onClose={onClose}
       />
 
-      <div style={{ flex: 1, position: 'relative' }}>
+      <div style={{ flex: 1, position: 'relative' }} onClick={() => setContextMenu(null)}>
         <ReactFlow
           nodes={enhancedNodes}
           edges={edges}
@@ -533,6 +790,7 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onPaneContextMenu={handlePaneContextMenu}
+          onPaneClick={() => setContextMenu(null)}
           colorMode="dark"
           fitView
           minZoom={0.2}
@@ -559,6 +817,77 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
           />
         </ReactFlow>
 
+        {contextMenu && (
+          <div
+            style={{
+              position: 'fixed',
+              left: contextMenu.x,
+              top: contextMenu.y,
+              backgroundColor: '#202020',
+              border: '1px solid #444',
+              borderRadius: 6,
+              padding: 4,
+              zIndex: 10000,
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.7)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                handleAddTextNode(contextMenu.flowPos);
+                setContextMenu(null);
+              }}
+              style={{
+                backgroundColor: 'transparent',
+                color: '#ecf0f1',
+                border: 'none',
+                borderRadius: 4,
+                padding: '6px 12px',
+                fontSize: 12,
+                textAlign: 'left',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#2c3e50')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+            >
+              <span>💬</span>
+              <span>Добавить реплику</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                handleAddBranchNode(contextMenu.flowPos);
+                setContextMenu(null);
+              }}
+              style={{
+                backgroundColor: 'transparent',
+                color: '#ecf0f1',
+                border: 'none',
+                borderRadius: 4,
+                padding: '6px 12px',
+                fontSize: 12,
+                textAlign: 'left',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#8e44ad')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+            >
+              <span>🔀</span>
+              <span>Добавить ветвление (Branch)</span>
+            </button>
+          </div>
+        )}
+
         <div
           style={{
             position: 'absolute',
@@ -576,7 +905,7 @@ const InnerDialogueEditorWorkspace: React.FC<InnerWorkspaceProps> = ({
             userSelect: 'none',
           }}
         >
-          ПКМ по пустому месту — добавить узел • ⚙️ — настроить условия и действия
+          ПКМ по пустому месту — добавить узел / ветвление • ⚙️ — настроить условия и действия
         </div>
       </div>
 

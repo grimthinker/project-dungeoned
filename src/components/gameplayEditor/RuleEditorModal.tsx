@@ -13,6 +13,10 @@ export interface RuleEditorModalProps {
   subtitle?: string;
   conditions: GameplayCondition[];
   actions: GameplayAction[];
+  tabTitles?: {
+    conditions: string;
+    actions: string;
+  };
   onSave: (conditions: GameplayCondition[], actions: GameplayAction[]) => void;
   onClose: () => void;
 }
@@ -23,6 +27,7 @@ export const RuleEditorModal: React.FC<RuleEditorModalProps> = ({
   subtitle,
   conditions: initialConditions,
   actions: initialActions,
+  tabTitles,
   onSave,
   onClose,
 }) => {
@@ -147,14 +152,14 @@ export const RuleEditorModal: React.FC<RuleEditorModalProps> = ({
               padding: '10px 0',
               backgroundColor: activeTab === 'conditions' ? '#222' : 'transparent',
               border: 'none',
-              borderBottom: activeTab === 'conditions' ? '2px solid #3498db' : 'none',
+              borderBottom: activeTab === 'conditions' ? '2px solid #e74c3c' : 'none',
               color: activeTab === 'conditions' ? '#fff' : '#777',
               fontSize: 12,
               fontWeight: 'bold',
               cursor: 'pointer',
             }}
           >
-            🔒 Условия (Conditions) [{conditions.length}]
+            {tabTitles?.conditions || '🔒 Условия (Conditions)'} [{conditions.length}]
           </button>
           <button
             type="button"
@@ -164,14 +169,14 @@ export const RuleEditorModal: React.FC<RuleEditorModalProps> = ({
               padding: '10px 0',
               backgroundColor: activeTab === 'actions' ? '#222' : 'transparent',
               border: 'none',
-              borderBottom: activeTab === 'actions' ? '2px solid #e67e22' : 'none',
+              borderBottom: activeTab === 'actions' ? '2px solid #2ecc71' : 'none',
               color: activeTab === 'actions' ? '#fff' : '#777',
               fontSize: 12,
               fontWeight: 'bold',
               cursor: 'pointer',
             }}
           >
-            ⚡ Действия (Actions) [{actions.length}]
+            {tabTitles?.actions || '⚡ Действия (Actions)'} [{actions.length}]
           </button>
         </div>
 
@@ -230,6 +235,8 @@ export const RuleEditorModal: React.FC<RuleEditorModalProps> = ({
                         <option value="is_alive">Сущность жива (is_alive)</option>
                         <option value="stance_is">Стойка тела равна (stance_is)</option>
                         <option value="stance_not">Стойка тела не равна (stance_not)</option>
+                        <option value="quest_status">Статус квеста (quest_status)</option>
+                        <option value="quest_stage">Стадия квеста (quest_stage)</option>
                       </select>
 
                       <button
@@ -362,6 +369,12 @@ export const RuleEditorModal: React.FC<RuleEditorModalProps> = ({
                         <option value="teleport">Телепортация (teleport)</option>
                         <option value="deal_damage">Нанести урон (deal_damage)</option>
                         <option value="end_dialogue">Завершить диалог (end_dialogue)</option>
+                        <option value="start_quest">Начать квест (start_quest)</option>
+                        <option value="set_quest_stage">
+                          Сменить этап квеста (set_quest_stage)
+                        </option>
+                        <option value="complete_quest">Завершить квест (complete_quest)</option>
+                        <option value="fail_quest">Провалить квест (fail_quest)</option>
                       </select>
 
                       <button
@@ -379,6 +392,107 @@ export const RuleEditorModal: React.FC<RuleEditorModalProps> = ({
                     </div>
 
                     {/* Параметры экшена */}
+                    {(act.type === 'start_quest' || act.type === 'complete_quest') && (
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input
+                          type="text"
+                          placeholder="ID квеста (например: fetch_dog_quest)"
+                          value={act.payload?.questId || ''}
+                          onChange={(e) =>
+                            handleUpdateAction(idx, act.type, { questId: e.target.value })
+                          }
+                          style={{
+                            flex: 1,
+                            backgroundColor: '#111',
+                            border: '1px solid #333',
+                            borderRadius: 4,
+                            color: '#f1c40f',
+                            fontWeight: 'bold',
+                            padding: '4px 8px',
+                            fontSize: 11,
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {act.type === 'set_quest_stage' && (
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input
+                          type="text"
+                          placeholder="ID квеста"
+                          value={act.payload?.questId || ''}
+                          onChange={(e) =>
+                            handleUpdateAction(idx, 'set_quest_stage', { questId: e.target.value })
+                          }
+                          style={{
+                            flex: 1,
+                            backgroundColor: '#111',
+                            border: '1px solid #333',
+                            borderRadius: 4,
+                            color: '#fff',
+                            padding: '4px 8px',
+                            fontSize: 11,
+                          }}
+                        />
+                        <input
+                          type="text"
+                          placeholder="ID этапа"
+                          value={act.payload?.stageId || ''}
+                          onChange={(e) =>
+                            handleUpdateAction(idx, 'set_quest_stage', { stageId: e.target.value })
+                          }
+                          style={{
+                            flex: 1,
+                            backgroundColor: '#111',
+                            border: '1px solid #333',
+                            borderRadius: 4,
+                            color: '#f1c40f',
+                            padding: '4px 8px',
+                            fontSize: 11,
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {act.type === 'fail_quest' && (
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input
+                          type="text"
+                          placeholder="ID квеста"
+                          value={act.payload?.questId || ''}
+                          onChange={(e) =>
+                            handleUpdateAction(idx, 'fail_quest', { questId: e.target.value })
+                          }
+                          style={{
+                            flex: 1,
+                            backgroundColor: '#111',
+                            border: '1px solid #333',
+                            borderRadius: 4,
+                            color: '#e74c3c',
+                            padding: '4px 8px',
+                            fontSize: 11,
+                          }}
+                        />
+                        <input
+                          type="text"
+                          placeholder="Причина (опционально)"
+                          value={act.payload?.reason || ''}
+                          onChange={(e) =>
+                            handleUpdateAction(idx, 'fail_quest', { reason: e.target.value })
+                          }
+                          style={{
+                            flex: 1,
+                            backgroundColor: '#111',
+                            border: '1px solid #333',
+                            borderRadius: 4,
+                            color: '#fff',
+                            padding: '4px 8px',
+                            fontSize: 11,
+                          }}
+                        />
+                      </div>
+                    )}
+
                     {act.type === 'set_flag' && (
                       <div style={{ display: 'flex', gap: 8 }}>
                         <input

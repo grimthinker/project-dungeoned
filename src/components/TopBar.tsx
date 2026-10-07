@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { t, useLocale, setLocale } from '../locales';
 import { GameMode } from '../config/gameConfig';
+import { EventBus } from '../core/EventBus';
 
 export interface TopBarProps {
   mode: GameMode;
@@ -257,6 +258,24 @@ export const TopBar: React.FC<TopBarProps> = ({
             title="Открыть визуальный редактор графов диалогов"
           >
             💬 Диалоги
+          </button>
+        )}
+
+        {mode === GameMode.EDITOR && (
+          <button
+            className="btn btn-sm"
+            style={{
+              backgroundColor: '#d35400',
+              color: '#fff',
+              border: 'none',
+              marginLeft: '4px',
+              padding: '4px 10px',
+              fontWeight: 'bold',
+            }}
+            onClick={() => EventBus.emit('quest:open-editor', { questId: 'fetch_dog_quest' })}
+            title="Открыть визуальный редактор графов квестов"
+          >
+            📜 Квесты
           </button>
         )}
       </div>

@@ -721,6 +721,36 @@ export const BlockMap: React.FC<BlockMapProps> = ({
       ctx.stroke();
     }
 
+    // 4.5. Отрисовка маркеров отслеживаемых квестов
+    if (snapshot.questMarkers) {
+      for (const marker of snapshot.questMarkers) {
+        const mPos = worldToScreen(marker.x, marker.z);
+        ctx.save();
+        ctx.translate(mPos.x, mPos.y);
+
+        // Золотой ромб маркера цели
+        ctx.fillStyle = '#f1c40f';
+        ctx.strokeStyle = '#111';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -9);
+        ctx.lineTo(8, 0);
+        ctx.lineTo(0, 9);
+        ctx.lineTo(-8, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#111';
+        ctx.font = 'bold 9px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('!', 0, 0);
+
+        ctx.restore();
+      }
+    }
+
     // 5. Отрисовка рамки поля видимости (Frustum) камеры
     if (camera) {
       const aspect =

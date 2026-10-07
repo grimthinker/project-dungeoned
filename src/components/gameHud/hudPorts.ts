@@ -103,6 +103,14 @@ export interface MapCreatureData {
   isDog: boolean;
 }
 
+export interface MapQuestMarkerDTO {
+  x: number;
+  z: number;
+  title: string;
+  questId: string;
+  entityId?: string;
+}
+
 export interface MapSnapshotDTO {
   terrain?: {
     width: number;
@@ -118,6 +126,34 @@ export interface MapSnapshotDTO {
   zones: MapZoneData[];
   creatures: MapCreatureData[];
   playerPos?: { x: number; z: number; angle: number };
+  questMarkers?: MapQuestMarkerDTO[];
+}
+
+export interface QuestObjectiveDTO {
+  id: string;
+  title: string;
+  current: number;
+  required: number;
+  isCompleted: boolean;
+  isOptional: boolean;
+  isHidden: boolean;
+}
+
+export interface QuestItemDTO {
+  id: string;
+  title: string;
+  description: string;
+  status: 'active' | 'completed' | 'failed';
+  isTracking: boolean;
+  currentStageTitle: string;
+  currentStageDescription: string;
+  objectives: QuestObjectiveDTO[];
+}
+
+export interface LogEntryDTO {
+  text: string;
+  type: 'quest' | 'dialogue' | 'combat' | 'system';
+  timestamp: number;
 }
 
 export interface ActiveReadingDTO {
@@ -207,4 +243,9 @@ export interface IHudDataProvider {
   setReadingPage(page: number): void;
   closeReading(): void;
   getActiveReading(): ActiveReadingDTO | null;
+
+  getQuests(): QuestItemDTO[];
+  getTrackedQuestId(): string | null;
+  trackQuest(questId: string, isTracking: boolean): void;
+  getLogEntries(): LogEntryDTO[];
 }

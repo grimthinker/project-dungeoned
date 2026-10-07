@@ -151,6 +151,35 @@ export const BlockMinimap: React.FC<BlockMinimapProps> = ({ hudProvider, playerI
       ctx.stroke();
     }
 
+    // 3.5. Отрисовка маркеров отслеживаемых квестов
+    if (snapshot.questMarkers) {
+      for (const marker of snapshot.questMarkers) {
+        const mPos = worldToScreen(marker.x, marker.z);
+        ctx.save();
+        ctx.translate(mPos.x, mPos.y);
+
+        ctx.fillStyle = '#f1c40f';
+        ctx.strokeStyle = '#111';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(0, -7);
+        ctx.lineTo(6, 0);
+        ctx.lineTo(0, 7);
+        ctx.lineTo(-6, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#111';
+        ctx.font = 'bold 8px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('!', 0, 0);
+
+        ctx.restore();
+      }
+    }
+
     // 4. Поле видимости камеры (Frustum)
     if (camera) {
       const aspect =

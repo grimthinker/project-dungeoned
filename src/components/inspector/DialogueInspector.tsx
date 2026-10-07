@@ -26,11 +26,19 @@ export const DialogueInspector: React.FC<DialogueInspectorProps> = ({
   const currentDialogueId = dialogueTarget?.dialogueId ?? '';
 
   const allDialogues = useMemo(() => {
-    return Object.values(DIALOGUE_REGISTRY).map((d) => ({
-      id: d.id,
-      title: d.title,
-      startText: d.nodes[d.startNodeId]?.text || '',
-    }));
+    return Object.values(DIALOGUE_REGISTRY).map((d) => {
+      const startNode = d.nodes[d.startNodeId];
+      const startText = startNode
+        ? startNode.nodeType === 'branch'
+          ? `[Ветвление: ${startNode.name || startNode.id}]`
+          : startNode.text || ''
+        : '';
+      return {
+        id: d.id,
+        title: d.title,
+        startText,
+      };
+    });
   }, []);
 
   const filteredDialogues = useMemo(() => {
@@ -90,21 +98,30 @@ export const DialogueInspector: React.FC<DialogueInspectorProps> = ({
         <div style={{ fontSize: '10px', color: '#aaa', fontFamily: 'monospace' }}>
           ID: {currentDialogueId || '—'}
         </div>
-        {currentDialogue && (
-          <div
-            style={{
-              fontSize: '11px',
-              color: '#bdc3c7',
-              marginTop: '6px',
-              fontStyle: 'italic',
-              maxHeight: '45px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            "{currentDialogue.nodes[currentDialogue.startNodeId]?.text}"
-          </div>
-        )}
+        {currentDialogue &&
+          (() => {
+            const startNode = currentDialogue.nodes[currentDialogue.startNodeId];
+            const previewText = startNode
+              ? startNode.nodeType === 'branch'
+                ? `[Ветвление: ${startNode.name || startNode.id}]`
+                : `"${startNode.text || ''}"`
+              : '';
+            return previewText ? (
+              <div
+                style={{
+                  fontSize: '11px',
+                  color: '#bdc3c7',
+                  marginTop: '6px',
+                  fontStyle: 'italic',
+                  maxHeight: '45px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {previewText}
+              </div>
+            ) : null;
+          })()}
       </div>
 
       {/* Поле поиска по списку существующих диалогов */}

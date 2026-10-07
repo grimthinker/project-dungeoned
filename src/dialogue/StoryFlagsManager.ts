@@ -1,8 +1,11 @@
+import { EventBus } from '../core/EventBus';
+
 export class StoryFlagsManager {
   private static flags: Map<string, any> = new Map();
 
   public static setFlag(key: string, value: any): void {
     StoryFlagsManager.flags.set(key, value);
+    EventBus.emit('story:flag-changed', { key, value });
   }
 
   public static getFlag<T = any>(key: string): T | undefined {
@@ -15,10 +18,12 @@ export class StoryFlagsManager {
 
   public static removeFlag(key: string): void {
     StoryFlagsManager.flags.delete(key);
+    EventBus.emit('story:flag-changed', { key, value: undefined });
   }
 
   public static clear(): void {
     StoryFlagsManager.flags.clear();
+    EventBus.emit('story:flag-changed', { key: '*', value: undefined });
   }
 
   public static getAllFlags(): Record<string, any> {
@@ -32,5 +37,6 @@ export class StoryFlagsManager {
         StoryFlagsManager.flags.set(k, v);
       }
     }
+    EventBus.emit('story:flag-changed', { key: '*', value: undefined });
   }
 }

@@ -24,6 +24,8 @@ import { buildObstacleColliders } from './utils/obstacleColliders';
 import { StoryFlagsManager } from '../dialogue/StoryFlagsManager';
 import { DialogueGraph } from '../dialogue/types';
 import { getAllDialogueGraphs, loadDialogues } from '../dialogue/dialogueRegistry';
+import { QuestGraph, SerializedQuestManagerData } from '../quest/types';
+import { getAllQuestGraphs, loadQuests } from '../quest/questRegistry';
 
 export interface SerializedTerrainData {
   width?: number;
@@ -61,6 +63,8 @@ export interface SerializedWorldData {
   entities: SerializedEntityData[];
   storyFlags?: Record<string, any>;
   dialogues?: Record<string, DialogueGraph>;
+  quests?: Record<string, QuestGraph>;
+  questProgress?: SerializedQuestManagerData;
 }
 
 export class WorldSerializer {
@@ -126,6 +130,8 @@ export class WorldSerializer {
       entities: this.serializeEntities(allIds),
       storyFlags: StoryFlagsManager.getAllFlags(),
       dialogues: getAllDialogueGraphs(),
+      quests: getAllQuestGraphs(),
+      questProgress: this.app.simulation.questManager.serialize(),
     };
   }
 
@@ -700,6 +706,8 @@ export class WorldSerializer {
 
     StoryFlagsManager.loadFlags(data.storyFlags ?? data.world?.storyFlags);
     loadDialogues(data.dialogues ?? data.world?.dialogues);
+    loadQuests(data.quests ?? data.world?.quests);
+    this.app.simulation.questManager.deserialize(data.questProgress ?? data.world?.questProgress);
 
     const cameraData = data.camera ?? data.world?.camera;
     if (cameraData) {

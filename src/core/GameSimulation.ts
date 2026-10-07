@@ -19,6 +19,7 @@ import { ThreeSyncSystem } from '../ecs/systems/ThreeSyncSystem';
 import { EnvironmentSystem } from '../ecs/systems/EnvironmentSystem';
 import { DialogueSystem } from '../ecs/systems/DialogueSystem';
 import { TriggerRuleSystem } from '../ecs/systems/TriggerRuleSystem';
+import { QuestManager } from '../quest/QuestManager';
 import { EntityFactory } from '../ecs/EntityFactory';
 import { WorldSerializer, SerializedWorldData } from '../ecs/WorldSerializer';
 import { IPhysicsDriver } from '../physics/IPhysicsDriver';
@@ -62,6 +63,7 @@ export class GameSimulation {
   public environmentSystem: EnvironmentSystem;
   public dialogueSystem: DialogueSystem;
   public triggerRuleSystem: TriggerRuleSystem;
+  public questManager: QuestManager;
 
   public entityFactory: EntityFactory;
   public serializer: WorldSerializer;
@@ -92,6 +94,7 @@ export class GameSimulation {
     this.environmentSystem = new EnvironmentSystem();
     this.dialogueSystem = new DialogueSystem(app);
     this.triggerRuleSystem = new TriggerRuleSystem(app);
+    this.questManager = new QuestManager(app, this.world);
     this.entityFactory = new EntityFactory();
     this.serializer = new WorldSerializer(app);
 
@@ -514,6 +517,7 @@ export class GameSimulation {
 
   public clearWorld(): void {
     this.dialogueSystem.closeDialogue(this.world);
+    this.questManager.clear();
     this.playerEntityId = null;
     const entities = this.world.getAllEntities();
     for (const [id, comp] of entities) {
@@ -565,6 +569,7 @@ export class GameSimulation {
 
   public destroy(): void {
     this.triggerRuleSystem.destroy();
+    this.questManager.destroy();
     this.threeSyncSystem.destroy();
     this.physicsDriver.destroy();
   }
