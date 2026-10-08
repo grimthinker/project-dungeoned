@@ -145,25 +145,23 @@ export class OutlinePass {
         }
 
         /**
-         * Покрытие контурной полосы в точке uv (0..1).
+         * Детекция кромки силуэта в точке uv. Возвращает (покрытие, вес выделения).
          *
-         * Границы двух видов:
-         *  - красный/зеленый каналы: граница «объект <-> фон» (внешний силуэт);
-         *  - альфа-канал (id объекта): граница двух соседних объектов.
+         * Полоса ровно одна и лежит целиком СНАРУЖИ силуэта — как у inverted-hull
+         * обводки. Схема «полоса внутрь + тонкая добавка наружу» оказалась
+         * неустойчивой: в зоне пересечения двух объектов пиксель за силуэтом
+         * переднего принадлежит ЗАДНЕМУ, у него своя глубина и своя «принадлежность»,
+         * и внутренняя проверка для него не срабатывала. Там оставалась только
+         * внутренняя половина полосы — вдвое тоньше и с видимой бахромой.
+         *
+         * Единая внешняя полоса от этого свободна: у переднего объекта она
+         * рисуется поверх заднего, и толщина одинакова во всех зонах кадра.
+         *
+         * Перекрытие «из коробки»: проход перекрывающей геометрии уже пишет depth
+         * рельефа и травы, поэтому объект за холмом не попадает в маску вовсе и
+         * полоса не может проявиться сквозь геометрию.
          */
-        float edgeCoverage(vec2 uv) {
-          vec4 c = texture2D(tMask, uv);
-
-          // Покрытие объектом в этой точке. Маска фильтруется линейно, поэтому на
-          // границе силуэта значение дробное — из него и получается сглаживание.
-          float inCenter = max(c.r, c.g);
-          if (inCenter <= 0.01) return 0.0;
-
-          // Шаг выборки пересчитывается под дистанцию объекта (c.b — метры до камеры)
-          float k = clamp(thicknessAtDistance(c.b), 0.0, uMaxThickness);
-          vec2 offTexels = vec2(k);
-          vec2 offUv = offTexels / uResolution;
-
+        vec2 edgeCoverage(vec2 uv) {
           vec2 dirs[8];
           dirs[0] = vec2(-1.0, 0.0);
           dirs[1] = vec2(1.0, 0.0);
@@ -174,45 +172,103 @@ export class OutlinePass {
           dirs[6] = vec2(-0.70710678, 0.70710678);
           dirs[7] = vec2(0.70710678, 0.70710678);
 
-          // Идентификатор объекта читаем строго из текселя (texelFetch), а не из
-          // линейно отфильтрованного значения: на кромке смешивание двух id дает
-          // промежуточную «выдуманную» сущность, и граница между объектами
-          // начинает расползаться вторым штрихом.
           ivec2 texSize = ivec2(uResolution);
           ivec2 centerTexel = clamp(ivec2(uv * uResolution), ivec2(0), texSize - ivec2(1));
-          float centerId = round(texelFetch(tMask, centerTexel, 0).a * ${OUTLINE_ID_SCALE}.0);
+          vec4 center = texelFetch(tMask, centerTexel, 0);
+          bool inObject = max(center.r, center.g) >= 0.5;
 
-          float notMine = 0.0;
+          /**
+           * Идентификатор объекта читаем строго из текселя (texelFetch), а не из
+           * линейно отфильтрованного значения: смешивание двух id на кромке даёт
+           * промежуточную «выдуманную» сущность.
+           *
+           * Именно id, а не глубина, определяет «свой это сосед или чужой».
+           * Разница глубин у соседних текселей ОДНОЙ поверхности, повёрнутой к
+           * камере под углом, спокойно превышает OBJECT_EDGE_DEPTH_EPSILON, и
+           * сравнение по глубине принимало бы собственный объект за стоящий
+           * впереди — тогда полоса расчерчивала бы наклонные грани чёрными
+           * линиями. Глубина нужна только для второго вопроса: стоит ли ЧУЖОЙ
+           * объект перед нами.
+           */
+          float centerId = round(center.a * ${OUTLINE_ID_SCALE}.0);
+
+          /**
+           * Проба: ищем объект, чья полоса может накрыть этот пиксель, и заодно
+           * берём его дистанцию до камеры — по ней считается толщина.
+           *
+           * Отдельный проход нужен потому, что у фонового пикселя depth = 0, и
+           * график толщины по нему дал бы толщину ближней точки графика вместо
+           * толщины реально стоящего рядом объекта.
+           *
+           * Радиуса два, и оба нужны. Дальний (maxThickness) ловит пиксели,
+           * отстоящие от силуэта на всю ширину полосы. Ближний (1 тексель)
+           * ловит тонкие объекты — столбы, ветки, прутья в несколько пикселей:
+           * дальний проб их перепрыгивает, и такой объект потерял бы контур
+           * совсем.
+           *
+           * Объект годится, только если он не наш собственный (с внутренней
+           * стороны силуэта не красим ничего) и стоит ВПЕРЕДИ нас: полоса
+           * переднего объекта должна ложиться на задний, а не наоборот.
+           */
+          float nearDepth = 0.0;
+          float nearSelect = 0.0;
+
+          for (int i = 0; i < 8; i++) {
+            for (int j = 0; j < 2; j++) {
+              float radius = j == 0 ? 1.0 : uMaxThickness;
+              ivec2 t = clamp(
+                centerTexel + ivec2(round(radius * dirs[i])),
+                ivec2(0),
+                texSize - ivec2(1)
+              );
+              vec4 p = texelFetch(tMask, t, 0);
+              if (max(p.r, p.g) < 0.5) continue;
+              float pId = round(p.a * ${OUTLINE_ID_SCALE}.0);
+              if (inObject && abs(pId - centerId) < 0.5) continue;
+              if (inObject && p.b > center.b - ${OBJECT_EDGE_DEPTH_EPSILON.toFixed(3)}) continue;
+              if (nearDepth == 0.0 || p.b < nearDepth) {
+                nearDepth = p.b;
+                nearSelect = p.g;
+              }
+            }
+          }
+
+          if (nearDepth == 0.0) return vec2(0.0);
+
+          // Шаг выборки — толщина полосы для дистанции найденного объекта.
+          float k = clamp(thicknessAtDistance(nearDepth), 0.0, uMaxThickness);
+          vec2 offTexels = vec2(k);
+          vec2 offUv = offTexels / uResolution;
+
+          float signal = 0.0;
+          float select = nearSelect;
 
           for (int i = 0; i < 8; i++) {
             vec4 s = texture2D(tMask, uv + offUv * dirs[i]);
+            // Дробное значение идёт в сигнал: так внешняя кромка полосы сглаживается
             float sInside = max(s.r, s.g);
+            if (sInside < 0.01) continue;
 
-            // id = 0 означает «объекта тут нет»: фон, рельеф или трава (они пишут
-            // в маску только глубину). Такой сосед отделяет нас обычным образом.
             ivec2 neighborTexel = clamp(
               centerTexel + ivec2(round(offTexels * dirs[i])),
               ivec2(0),
               texSize - ivec2(1)
             );
             float sId = round(texelFetch(tMask, neighborTexel, 0).a * ${OUTLINE_ID_SCALE}.0);
-            bool otherObject = sId >= 0.5 && abs(sId - centerId) >= 0.5;
+            // id = 0 — это фон, рельеф или трава: они пишут в маску только
+            // глубину и стоят позади любого кандидата контура.
+            if (sId < 0.5) continue;
+            if (inObject && abs(sId - centerId) < 0.5) continue;
+            if (inObject && s.b > center.b - ${OBJECT_EDGE_DEPTH_EPSILON.toFixed(3)}) continue;
 
-            float separation = 1.0 - sInside;
-            if (otherObject) {
-              // Грань двух объектов рисуется ТОЛЬКО со стороны переднего.
-              // Если соседний объект впереди нас — нас перекрывают, контур здесь
-              // не рисуется. Иначе на стыке двух деревьев получалась бы двойная
-              // линия: контур переднего плюс контур заднего.
-              separation = s.b > c.b + ${OBJECT_EDGE_DEPTH_EPSILON.toFixed(3)} ? 1.0 : 0.0;
-            }
-            notMine = max(notMine, separation);
+            signal = max(signal, sInside);
+            // Цвет берём у соседа, создавшего границу: у пикселя вне силуэта
+            // собственного канала нет, иначе cel-контур красился бы цветом выделения.
+            select = s.g / max(sInside, 1e-4);
           }
 
-          // Пиксель принадлежит полосе контура, если сам объект здесь есть
-          // и на расстоянии k начинается что-то другое (фон или объект позади)
-          float band = smoothstep(0.5 - uSoftness * 0.45, 0.5 + uSoftness * 0.45, notMine);
-          return inCenter * band;
+          float band = smoothstep(0.5 - uSoftness * 0.45, 0.5 + uSoftness * 0.45, signal);
+          return vec2(band, clamp(select, 0.0, 1.0));
         }
 
         void main() {
@@ -230,19 +286,21 @@ export class OutlinePass {
           sub[6] = vec2(0.75, 0.25);
           sub[7] = vec2(0.25, 0.75);
 
-          float coverage = 0.0;
+          vec2 acc = vec2(0.0);
           for (int i = 0; i < MAX_SUBPIXEL_SAMPLES; i++) {
             if (i >= uSamples) break;
-            coverage += edgeCoverage(vUv + sub[i] * texel);
+            acc += edgeCoverage(vUv + sub[i] * texel);
           }
-          coverage /= float(max(uSamples, 1));
+          acc /= float(max(uSamples, 1));
 
+          float coverage = clamp(acc.x, 0.0, 1.0);
           if (coverage <= 0.003) discard;
 
-          // Цвет берём из центра пикселя: там же решается, cel это контур или выделение
-          vec4 c = texture2D(tMask, vUv);
           // Зеленый канал (выделение) имеет приоритет по цвету над красным (cel)
-          gl_FragColor = vec4(mix(uCelColor, uSelectColor, c.g), clamp(coverage, 0.0, 1.0));
+          gl_FragColor = vec4(
+            mix(uCelColor, uSelectColor, clamp(acc.y, 0.0, 1.0)),
+            coverage
+          );
         }
       `,
       transparent: true,

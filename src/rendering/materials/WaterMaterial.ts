@@ -185,6 +185,17 @@ export function createWaterMaterial(
       varying vec3 vNormal;
       varying float vWaveHeight;
 
+      /**
+       * Interleaved Gradient Noise — детерминированный дешёвый хеш по пикселю.
+       *
+       * Используется в двух местах: джиттер выборки карты глубины (разбивает
+       * контуры, привязанные к сетке depth-таргета) и дизеринг выходного цвета
+       * (гасит полосы 8-битного буфера кадра на больших плавных заливках).
+       */
+      float ignNoise(vec2 p) {
+        return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+      }
+
       float linearizeDepth(float rawDepth) {
         return (uCameraNear * uCameraFar) / (uCameraFar - rawDepth * (uCameraFar - uCameraNear));
       }
@@ -219,18 +230,50 @@ export function createWaterMaterial(
       void main() {
         // --- 1. РАСЧЕТ ТОЛЩИНЫ ВОДЫ (DEPTH) И ПОГЛОЩЕНИЯ СВЕТА ---
         float waterDepth = 2.0;
+        float waterDepthSmooth = 2.0;
         if (uFxDepth > 0.5 && uResolution.x > 10.0) {
           // uResolution — размер ИТОГОВОГО кадра: gl_FragCoord находится в его
           // пикселях. Таргет глубины имеет меньшее разрешение, но нормированные
           // UV у него те же, поэтому приведение к [0,1] обязательно.
           // Clamp защищает от выхода за границы при любой потере синхронизации.
           vec2 screenUv = clamp(gl_FragCoord.xy / uResolution, 0.0, 1.0);
+
+          // Джиттер точки выборки на ±0.5 текселя depth-таргета.
+          //
+          // Данные в таргете кусочно-постоянные в пределах своего текселя, поэтому
+          // толщина воды меняется ступенями по сетке: на пологом берегу (уклон
+          // дна ~0.01 м на пиксель кадра) шаг в 4 пикселя давал скачок цвета
+          // ~4.5%, и билинейная выборка превращала его в волнистые полосы вдоль
+          // контуров дна. Смещение точки выборки ломает эту привязку к сетке:
+          // ступени превращаются в мелкий шум, который глаз читает как текстуру,
+          // а не как дефект. Стоимость — две ALU-операции, новых выборок нет.
+          vec2 depthJitter = vec2(
+            ignNoise(gl_FragCoord.xy),
+            ignNoise(gl_FragCoord.yx + vec2(37.0, 17.0))
+          ) - 0.5;
+          screenUv = clamp(screenUv + depthJitter * uDepthTexel, 0.0, 1.0);
           // Половинный текель с каждой стороны: билинейная выборка должна
           // покрывать в том числе рамку кадра, иначе край лодочки будет грубым.
           vec2 texel = max(uDepthTexel * 0.5, vec2(1e-6));
           float sceneDepth = linearizeDepth(readDepthBilinear(screenUv, texel));
           float surfaceDepth = getLinearDepthFromFragCoord(gl_FragCoord.z);
           waterDepth = max(0.0, sceneDepth - surfaceDepth);
+
+          /**
+           * Толщина воды БЕЗ джиттера — только для расчёта кромки пены.
+           *
+           * Джиттер решает одну задачу (ломает контуры, привязанные к сетке
+           * depth-таргета) и портит другую: и порог пены, и fwidth для её
+           * размытия брались из зашумлённого значения, поэтому край пены
+           * получался зернистым. Считаем второе значение той же ручной
+           * билинейной выборкой, но без смещения точки: это +4 чтения из
+           * крошечного таргета, а кромка снова становится гладкой.
+           */
+          vec2 screenUvSmooth = clamp(gl_FragCoord.xy / uResolution, 0.0, 1.0);
+          waterDepthSmooth = max(
+            0.0,
+            linearizeDepth(readDepthBilinear(screenUvSmooth, texel)) - surfaceDepth
+          );
         }
 
         // Нормализованный коэффициент глубины от 0.0 (кромка берега) до 1.0 (на дистанции uClarity)
@@ -254,24 +297,28 @@ export function createWaterMaterial(
 
         // Пена на гребнях аналитических волн (в обычном пресете); в низком — отключается
         float waveFoam = 0.0;
-        float shoreFoam = smoothstep(${GRAPHICS_CONFIG.water.shoreFoamDistance.toFixed(2)}, 0.02, waterDepth);
+        float shoreFoam = smoothstep(${GRAPHICS_CONFIG.water.shoreFoamDistance.toFixed(2)}, 0.02, waterDepthSmooth);
 
         /**
          * Сглаживание кромки пены по экранной производной толщины воды.
          *
          * Полоса пены у́же пикселя на большом удалении, поэтому резкий
          * smoothstep дает лесенку. Ширину перехода расширяем на
-         * величину изменения waterDepth за пиксель (fwidth): на большой
+         * величину изменения толщины за пиксель (fwidth): на большой
          * дистанции кромка автоматически размывается в мягкий градиент,
-         * а вблизи остается резкой. Ноль стоит — пара ALU-операций, новых
-         * выборок текстур нет.
+         * а вблизи остается резкой.
+         *
+         * И порог, и fwidth берём из waterDepthSmooth: джиттер выборки глубины
+         * нужен для цвета, но на кромке пены он давал зерно. Верхняя отсечка
+         * защищает от противоположной проблемы — на скользящих к камере
+         * поверхностях производная огромна, и без неё пена заливала бы пол-кадра.
          */
-        float foamEdge = fwidth(waterDepth);
+        float foamEdge = min(fwidth(waterDepthSmooth), ${GRAPHICS_CONFIG.water.shoreFoamDistance.toFixed(2)});
         if (foamEdge > 1e-4) {
           shoreFoam = smoothstep(
             ${GRAPHICS_CONFIG.water.shoreFoamDistance.toFixed(2)} + foamEdge,
             0.02 - foamEdge,
-            waterDepth
+            waterDepthSmooth
           );
         }
 
@@ -359,6 +406,17 @@ export function createWaterMaterial(
         gl_FragColor = vec4(finalColor, dynamicOpacity);
         
         #include <fog_fragment>
+
+        // Дизеринг выходного цвета (±1/255).
+        //
+        // Переход «мелководье -> глубина» уложен в clarity = 2..3 м, поэтому на
+        // отмелом берегу это сотни пикселей с изменением цвета меньше одного
+        // уровня на пиксель — и 8-битный буфер кадра честно показывает полосы
+        // Маха, тем более заметные на удалении. Дизеринг после тумана убирает
+        // и градиент тумана. Работа идёт в линейном пространстве шейдера, но
+        // перевод в sRGB только растягивает амплитуду (в тенях сильнее), так
+        // что ±1/255 заведомо перекрывает половину уровня 8-битной шкалы.
+        gl_FragColor.rgb += (ignNoise(gl_FragCoord.xy) - 0.5) / 128.0;
       }
     `,
     transparent: true,
@@ -367,6 +425,6 @@ export function createWaterMaterial(
   });
 
   material.userData.isSharedMaterial = true;
-  material.customProgramCacheKey = () => 'WaterShaderMaterial_v11';
+  material.customProgramCacheKey = () => 'WaterShaderMaterial_v13';
   return material;
 }
