@@ -11,6 +11,14 @@ export interface GrassMaterialUniforms {
   uCameraPos: { value: THREE.Vector3 };
   uFadeStart: { value: number };
   uFadeEnd: { value: number };
+  /** Начало полосы разрежения травы (метры) */
+  uLodStart: { value: number };
+  /** Конец полосы разрежения травы (метры) */
+  uLodEnd: { value: number };
+  /** Минимальный множитель плотности на дальней дистанции */
+  uMinDensity: { value: number };
+  /** Ширина мягкого перехода «инстанс живёт / умер» по шкале плотности */
+  uDensityFadeWidth: { value: number };
 }
 
 /**
@@ -30,8 +38,12 @@ export function createGrassUniforms(): GrassMaterialUniforms {
     uTrampleCenter: { value: new THREE.Vector2(0, 0) },
     uTrampleSize: { value: GRASS_CONFIG.trample.mapSize },
     uCameraPos: { value: new THREE.Vector3(0, 0, 0) },
-    uFadeStart: { value: 35.0 },
-    uFadeEnd: { value: 45.0 },
+    uFadeStart: { value: GRASS_CONFIG.fade.fadeStartDistance },
+    uFadeEnd: { value: GRASS_CONFIG.fade.fadeEndDistance },
+    uLodStart: { value: GRASS_CONFIG.lod.blendStartDistance },
+    uLodEnd: { value: GRASS_CONFIG.lod.blendEndDistance },
+    uMinDensity: { value: GRASS_CONFIG.lod.minDensityFactor },
+    uDensityFadeWidth: { value: GRASS_CONFIG.lod.densityFadeWidth },
   };
 }
 
@@ -46,6 +58,24 @@ const GRASS_UNIFORM_DECLARATIONS = `
       uniform vec3 uCameraPos;
       uniform float uFadeStart;
       uniform float uFadeEnd;
+      uniform float uLodStart;
+      uniform float uLodEnd;
+      uniform float uMinDensity;
+      uniform float uDensityFadeWidth;
+
+      /**
+       * Стабильный по мировым координатам псевдослучайный шум [0..1).
+       *
+       * Нужен для разрежения травы в вершинном коде. Важно, что он считается
+       * от ПОЗИЦИИ инстанса, а не от номера ячейки: инстансов больше не отбрасывается
+       * на CPU, и у шейдера нет их номера. Hash от позиции даёт ту же
+       * пространственную случайность, что и хеш от номера ячейки.
+       */
+      float grassHash(vec2 p) {
+        vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+        p3 += dot(p3, p3.yzx + 33.33);
+        return fract((p3.x + p3.y) * p3.z);
+      }
 `;
 
 /**
@@ -66,7 +96,12 @@ const GRASS_VERTEX_PATCH = `
       // Вектор от корня пучка к текущей вершине
       vec3 bladeOffset = baseWorldPos.xyz - instanceRoot.xyz;
 
-      // uv.y строго 0.0 у корня и 1.0 на кончике (корень всегда неподвижен)
+      // uv.y — это ПРОФИЛЬ ИЗГИБА, а не текстурная координата: 0 у корня,
+      // максимум на верхушке. У обычной травы он линейный 0..1, поэтому корень
+      // неподвижен, а конец выгибается сильнее всего. У соцветий (колосок,
+      // початок, венчик цветка) геометрия задаёт его постоянным и равным
+      // профилю верха стебля — тогда соцветие едет вместе со стеблем как одно
+      // жёсткое целое и не сминается.
       float hFactor = uv.y;
 
       // 1. Считывание примятости и направления из следящей Trample Texture
@@ -128,7 +163,32 @@ const GRASS_VERTEX_PATCH = `
       float distToCam = length(instanceRoot.xz - uCameraPos.xz);
       float distFactor = clamp((uFadeEnd - distToCam) / max(0.001, uFadeEnd - uFadeStart), 0.0, 1.0);
       float distanceScale = distFactor * distFactor * (3.0 - 2.0 * distFactor);
-      bladeOffset *= distanceScale;
+
+      /**
+       * Разрежение плотности — плавное «схлопывание в ноль», а не вырезание.
+       *
+       * Раньше порог плотности применялся на CPU бинарным сравнением с хешем
+       * ячейки: как только порог опускался ниже хеша, инстанс просто не попадал
+       * в буфер и пучок исчезал мгновенно. Поскольку хеш плотности и хеш
+       * упрощения геометрии использовали разные сиды, в одной области часть
+       * травинок переключалась на упрощённую форму, а часть соседних просто
+       * пропадала — отсюда «рваный» вид на дистанции.
+       *
+       * Теперь порог остаётся тем же (тот же закон 1 + (minDensity - 1) * lodT),
+       * но сравнение с ним сглажено: инстанс сжимается до нуля на конечном
+       * участке шкалы плотности, поэтому исчезновение выглядит как усадка.
+       */
+      float lodT = clamp((distToCam - uLodStart) / max(0.001, uLodEnd - uLodStart), 0.0, 1.0);
+      lodT = lodT * lodT * (3.0 - 2.0 * lodT);
+      float densityThreshold = 1.0 + (uMinDensity - 1.0) * lodT;
+      float instanceHash = grassHash(floor(instanceRoot.xz * 2.5));
+      float keep = smoothstep(
+        -uDensityFadeWidth * 0.5,
+        uDensityFadeWidth * 0.5,
+        densityThreshold - instanceHash
+      );
+
+      bladeOffset *= distanceScale * keep;
 
       // Итоговая позиция: корень куста + скорректированный по дуге вектор травинки
       vec4 worldPos = vec4(instanceRoot.xyz + bladeOffset, 1.0);

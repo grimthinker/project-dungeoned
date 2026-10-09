@@ -86,9 +86,144 @@ export class ThreeRenderer implements IRenderer {
   // Кэшированный цвет фона меню (избегаем аллокации Color каждый кадр)
   private _menuBackground = new THREE.Color('#111111');
 
+  /**
+   * Патч ставится один раз: чанк глобальный, повторная подмена испортила бы
+   * уже скомпилированные программы.
+   */
+  private static shadowDitherPatched = false;
+
+  /** Патч slope-scaled bias ставится один раз по той же причине. */
+  private static slopeBiasPatched = false;
+
+  /**
+   * Дизеринг порога сравнения в карте теней.
+   *
+   * ЗАЧЕМ ИМЕННО ЗДЕСЬ. Раньше дизеринг добавлялся к `dotNL` перед
+   * квантованием cel-освещения, и это было неверно: на плоской грани `dotNL`
+   * постоянен (нормаль постоянна, а у DirectionalLight направление — константа
+   * на всю сцену), шумить там нечего. Полосы живут в ДРУГОМ месте произведения
+   *
+   *     irradiance = quantize(dotNL) * lightColor * shadowTerm
+   *
+   * а именно в shadowTerm: карта теней хранит ОДНО число глубины на квадрат
+   * ~3.4 см, поэтому у соседних фрагментов одной грани сравнение идёт с
+   * разными значениями и где-то перескакивает. Тени поворачиваются вместе с
+   * солнцем — это подтверждает, что полосы идут по сетке текселей.
+   *
+   * ЧТО ДЕЛАЕМ. Перед сравнением глубин добавляем пофпиксельный шум. Раньше
+   * граница «в тени / не в тени» перескакивала резко и в одном месте, теперь
+   * она рассыпается в мелкий шум, который глаз читает как мягкий переход.
+   *
+   * ЧЕМ ЭТО ЛУЧШЕ normalBias. normalBias двигает точку проверки — это СМЕЩЕНИЕ,
+   * и у него жёсткий порог: либо меньше зазора (acne виден, контактные тени
+   * есть), либо больше (контактные тени пропадают совсем). Промежуточных
+   * значений не бывает. Здесь размен плавный: амплитуда подбирается
+   * балансом между «полосы ещё видны» и «контактные тени порозовели».
+   *
+   * Цена — зерно на краях теней: дизеринг задевает ВСЕ тени, включая траву и
+   * рельеф. Это осознанный размен, а не бесплатное улучшение.
+   */
+  private static patchShadowDither(): void {
+    if (ThreeRenderer.shadowDitherPatched) return;
+    ThreeRenderer.shadowDitherPatched = true;
+
+    const cfg = GRAPHICS_CONFIG.shadows;
+    const ditherMeters = cfg.shadowDither;
+    if (ditherMeters <= 0) return;
+
+    // Амплитуда задаётся в метрах, а шейдер оперирует нормализованной глубиной
+    // [0..1] на диапазоне near..far — переводим один раз здесь.
+    const depthRange = Math.max(1, cfg.far - cfg.near);
+    const amplitude = ditherMeters / depthRange;
+
+    const chunk = THREE.ShaderChunk.shadowmap_pars_fragment;
+    const anchor = '// Hardware PCF with LinearFilter gives us 4-tap filtering per sample';
+    if (!chunk.includes(anchor)) {
+      console.warn('[ThreeRenderer] Патч дизеринга теней не применён: чанк three изменился');
+      return;
+    }
+
+    // Вставляем перед вычислением сэмплов PCF: shadowCoord — параметр функции
+    // (передаётся по значению), поэтому правка локальна и на остальное не влияет.
+    THREE.ShaderChunk.shadowmap_pars_fragment = chunk.replace(
+      anchor,
+      [
+        '\t\t\t\t// Дизеринг порога сравнения глубин (см. ThreeRenderer.patchShadowDither)',
+        '\t\t\t\tshadowCoord.z += ( interleavedGradientNoise( gl_FragCoord.xy + vec2( 31.7, 11.3 ) ) - 0.5 ) *' +
+          ` ${amplitude.toFixed(6)};`,
+        '',
+        '\t\t\t\t' + anchor,
+      ].join('\n')
+    );
+  }
+
+  /**
+   * Slope-scaled depth bias: смещение глубины, зависящее от угла падения луча.
+   *
+   * ЗАЧЕМ. Ошибка глубины внутри одного текселя карты теней не постоянна — она
+   * растёт с наклоном поверхности к лучу света. Поэтому постоянное normalBias
+   * вынуждено выбирать: чуть меньше — acne виден, чуть больше — контактная тень
+   * (тень головы на плечах, тень под ногами) пропадает целиком. Промежуточных
+   * значений не бывает, и это не настройка, а развилка.
+   *
+   * Slope-bias разводит эти два требования по разным поверхностям: на грани,
+   * повёрнутой к солнцу, множитель схлопывается в ноль, и смещение там не
+   * добавляется ничего; на скользящей грани он растёт и закрывает всю ошибку
+   * сам. Контактные тени живут на освещённых гранях, поэтому страдают меньше.
+   *
+   * ГДЕ ПАТЧИТСЯ. В `lights_fragment_begin`, а НЕ в `shadowmap_pars_fragment`.
+   * Формуле нужен N·L, а `getShadow` нормали не получает — это параметр
+   * `shadowBias`, который передаётся числом. Зато в точке вызова всё нужное уже
+   * в области видимости: `geometryNormal` объявлен в начале чанка,
+   * `directLight.direction` получен из `getDirectionalLightInfo` строкой выше.
+   *
+   * ЧАНК ГЛОБАЛЬНЫЙ — правка затронет все материалы (рельеф, траву, воду, toon).
+   * Это намеренно: acne — дефект самой карты теней, а не материала, и лечится
+   * он везде одинаково. Ограничивать только toon смысла нет.
+   *
+   * Патчится ТОЛЬКО вызов для направленного источника: в сцене солнце и луна,
+   * остальные источники теней не отбрасывают, а трогать их ветки без нужды —
+   * лишний риск.
+   */
+  private static patchSlopeScaledShadowBias(): void {
+    if (ThreeRenderer.slopeBiasPatched) return;
+    ThreeRenderer.slopeBiasPatched = true;
+
+    const cfg = GRAPHICS_CONFIG.shadows;
+    const scaleMeters = cfg.slopeBiasScale;
+    if (scaleMeters <= 0) return;
+
+    // Смещение в шейдере измеряется нормализованной глубиной [0..1] на
+    // диапазоне near..far, а конфиг задаёт его в метрах — переводим один раз.
+    const depthRange = Math.max(1, cfg.far - cfg.near);
+    const scale = scaleMeters / depthRange;
+    const cap = Math.max(1, cfg.slopeBiasCap);
+
+    const chunk = THREE.ShaderChunk.lights_fragment_begin;
+
+    // Якорь — уникальная строка вызова getShadow для направленного света.
+    const anchor =
+      'directLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;';
+    if (!chunk.includes(anchor)) {
+      console.warn('[ThreeRenderer] Патч slope-bias не применён: чанк three изменился');
+      return;
+    }
+
+    // abs() — двусторонние материалы (вода, небо, трава) отдают нормаль,
+    // развёрнутую к наблюдателю; без abs их N·L уходил бы в минус и получал
+    // максимальное смещение вместо нулевого.
+    const replacement = [
+      '// Slope-scaled depth bias (см. ThreeRenderer.patchSlopeScaledShadowBias)',
+      `float _slopeNL = clamp( abs( dot( geometryNormal, directLight.direction ) ), 0.05, 1.0 );`,
+      `float _slopeBias = min( sqrt( 1.0 - _slopeNL * _slopeNL ) / _slopeNL, ${cap.toFixed(3)} ) * ${scale.toFixed(8)};`,
+      'directLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias + _slopeBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;',
+    ].join('\n\t\t');
+
+    THREE.ShaderChunk.lights_fragment_begin = chunk.replace(anchor, replacement);
+  }
+
   constructor(container: HTMLDivElement) {
     this.container = container;
-
     // Глобальная настройка атмосферного тумана с отсечкой ближнего плана и ограничением максимальной дымки
     THREE.ShaderChunk.fog_fragment = `
     #ifdef USE_FOG
@@ -104,6 +239,9 @@ export class ThreeRenderer implements IRenderer {
       gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
     #endif
     `;
+
+    ThreeRenderer.patchShadowDither();
+    ThreeRenderer.patchSlopeScaledShadowBias();
 
     // Создаем WebGL рендерер с включенными тенями PCFShadowMap
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -649,6 +787,8 @@ export class ThreeRenderer implements IRenderer {
     const env = context.environment ?? DEFAULT_ENV_FALLBACK;
 
     const visibleRadius = dist * GRAPHICS_CONFIG.shadows.frustumMargin;
+    // Тот же радиус, что и у отсечения теней чанков рельефа — обе стороны
+    // обязаны считать охват по одной формуле (computeShadowBounds)
 
     this.environmentManager.setVisibility(context.gameMode !== 'menu');
 
@@ -823,13 +963,16 @@ export class ThreeRenderer implements IRenderer {
 
     // --- 2.1 ПОСТ-ПРОЦЕСС ОБВОДОК (cel-shading контур + выделение выбора) ---
     const hasSelection = context.editorData.selectedIds && context.editorData.selectedIds.size > 0;
-    if (context.celShading || hasSelection) {
+    // Флаг контурных линий независим от cel-освещения: пользователь может
+    // получить cel без обводки и наоборот — только обводку выделения
+    const outlinesEnabled = context.outlineLines !== false;
+    if (outlinesEnabled && (context.celShading || hasSelection)) {
       if (!this.outlinePass) {
         this.outlinePass = new OutlinePass();
       }
       this.gpuProfiler.beginPass('Outlines');
       this.outlinePass.render(this.renderer, this.scene, this.camera, internalW, internalH, {
-        cel: Boolean(context.celShading),
+        cel: outlinesEnabled && Boolean(context.celShading),
         select: hasSelection,
         selectColor:
           context.gameMode === 'game'

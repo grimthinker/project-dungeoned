@@ -76,6 +76,28 @@ export class GameApp implements IEditorContext, ISelectionHostContext {
     this.emitState();
   }
 
+  /**
+   * Включение контурных линий (cel-обводка и обводка выделения).
+   *
+   * Раньше этот флаг был жёстко связан с celShading: контуры рисовались
+   * всегда, когда включён cel. Теперь независимая настройка — cel-освещение
+   * можно применять без контуров (например, ради чистых форм при съёмке), а
+   * контуры оставить включёнными при выключенном cel (только обводка выделения).
+   */
+  private _outlineLines: boolean = (() => {
+    const saved = localStorage.getItem('engine_outline_lines');
+    return saved !== null ? saved === 'true' : true;
+  })();
+  public get outlineLines() {
+    return this._outlineLines;
+  }
+  public set outlineLines(val: boolean) {
+    if (this._outlineLines === val) return;
+    this._outlineLines = val;
+    localStorage.setItem('engine_outline_lines', String(val));
+    this.emitState();
+  }
+
   private _showFPSMonitor: boolean = (() => {
     const saved = localStorage.getItem('engine_show_fps_monitor');
     return saved !== null ? saved === 'true' : true;
@@ -256,6 +278,7 @@ export class GameApp implements IEditorContext, ISelectionHostContext {
       showUIOverlays: this._showUIOverlays,
       showAIDebug: this._showAIDebug,
       celShading: this._celShading,
+      outlineLines: this._outlineLines,
       showFPSMonitor: this._showFPSMonitor,
     });
   }
@@ -571,6 +594,7 @@ export class GameApp implements IEditorContext, ISelectionHostContext {
       camera: this.camera,
       gameMode: this.gameMode,
       celShading: this._celShading,
+      outlineLines: this._outlineLines,
       editorData: {
         selectedId: this.selection.selectedEntityId,
         selectedIds: this.selection.selectedEntityIds,

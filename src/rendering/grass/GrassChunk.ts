@@ -127,7 +127,6 @@ export class GrassChunk {
     const cellSize = 0.4;
 
     const safeDensity = Math.max(0, Math.min(1, densityFactor));
-    const minDensity = GRASS_CONFIG.lod.minDensityFactor;
 
     const instances = createBuckets();
     const lowInstances = createBuckets();
@@ -157,13 +156,25 @@ export class GrassChunk {
         const gridX = Math.round(wx / cellSize);
         const gridZ = Math.round(wz / cellSize);
 
-        // Плавная деградация по дистанции: доля LOD и множитель плотности
+        // Плавная деградация геометрии по дистанции (доля LOD)
         const lodT = lodBlendFactor(Math.hypot(wx - camX, wz - camZ));
-        const densityMultiplier = 1 + (minDensity - 1) * lodT;
 
-        // Вероятностная фильтрация плотности: равномерно оценивает каждую ячейку без обрыва по осям
+        /**
+         * БАЗОВАЯ плотность — порог по splatmap, без участия камеры.
+         *
+         * Дистанционное разрежение отсюда убрано намеренно: раньше порог
+         * домножался на densityMultiplier и сравнивался бинарно, из-за чего
+         * инстанс либо жил, либо мгновенно исчезал (видимо как «щелчок»).
+         * Теперь плавная часть считается в вершинном шейдере, где порог
+         * сравнивается с псевдослучайным числом через smoothstep, и травинка
+         * сжимается до нуля постепенно.
+         *
+         * Базовый порог остаётся здесь потому, что он отражает СОСТАВ
+         * территории (растимость из splatmap) и не зависит от камеры: значит
+         * чанк с неизменной базой можно перестать пересобирать из-за плотности.
+         */
         const hProb = fastHash(gridX, gridZ, 1) * 255;
-        if (hProb > Math.min(255, totalDensity * safeDensity * densityMultiplier)) continue;
+        if (hProb > Math.min(255, totalDensity * safeDensity)) continue;
 
         const terrainY = getTerrainHeightAt(terrain, wx, wz);
         if (terrainY === null) continue;

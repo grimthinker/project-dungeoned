@@ -17,6 +17,17 @@ export interface GrassClusterOptions {
 
 export type FlowerType = 'poppy' | 'cornflower' | 'daisy' | 'dandelion';
 
+/**
+ * Вес изгиба для стебля и всего соцветия цветка (общий на оба).
+ *
+ * uv.y в геометрии травы — это не текстурная координата, а ПРОФИЛЬ ИЗГИБА:
+ * вершинный шейдер крутит каждую вершину вокруг корня на угол
+ * `bendAngle * uv.y`. Поэтому у соцветия значение должно совпадать с профилем
+ * верха стебля: иначе лепестки выгибаются сильнее стебля, отрываются от него
+ * и сминаются в лепёшку при приминании существом.
+ */
+const FLOWER_BEND_WEIGHT = 0.5;
+
 export class GrassGeometryBuilder {
   /** Обычный зеленый пучок травы */
   public static createClusterGeometry(options: GrassClusterOptions = {}): THREE.BufferGeometry {
@@ -265,7 +276,10 @@ export class GrassGeometryBuilder {
           const nz = Math.sin(sa) * 0.45;
           normals.push(nx, 0.8, nz);
 
-          uvs.push(s / earSides, 0.65 + rt * 0.35);
+          // Профиль изгиба по всей колосовине одинаков и равен профилю верха
+          // стебля (0.65). Раньше он рос до 1.0, и при приминании колосок
+          // крутился сильнее стебля: отрывался от него и сминался.
+          uvs.push(s / earSides, 0.65);
           colors.push(earColor.r, earColor.g, earColor.b);
           vIdx++;
         }
@@ -387,7 +401,8 @@ export class GrassGeometryBuilder {
       // Вершина пирамиды (самая верхняя точка колоска)
       positions.push(rootX + leanX * 1.05, earBaseY + earHeight, rootZ + leanZ * 1.05);
       normals.push(0, 1, 0);
-      uvs.push(0.5, 1.0);
+      // Вершина пирамиды едет вместе с основанием — профиль изгиба тот же
+      uvs.push(0.5, 0.65);
       colors.push(earColor.r, earColor.g, earColor.b);
       const apexIdx = positions.length / 3 - 1;
 
@@ -509,7 +524,10 @@ export class GrassGeometryBuilder {
         const nz = Math.sin(sa) * 0.55;
         normals.push(nx, 0.75, nz);
 
-        uvs.push(s / sides, 0.7 + rt * 0.25);
+        // Профиль изгиба початка равен профилю стебля в точке его крепления
+        // (headBaseY = 0.75 высоты). Раньше он рос до 0.95, из-за чего початок
+        // при приминании отрывался от стебля и сплющивался.
+        uvs.push(s / sides, 0.75);
         colors.push(headColor.r, headColor.g, headColor.b);
         vIdx++;
       }
@@ -632,12 +650,12 @@ export class GrassGeometryBuilder {
       const sa = (s / 4) * Math.PI * 2;
       positions.push(Math.cos(sa) * headRadius * 0.7, headBaseY, Math.sin(sa) * headRadius * 0.7);
       normals.push(Math.cos(sa) * 0.55, 0.75, Math.sin(sa) * 0.55);
-      uvs.push(0, 0.7);
+      uvs.push(0, 0.75);
       colors.push(headColor.r, headColor.g, headColor.b);
     }
     positions.push(0, headBaseY + headHeight, 0);
     normals.push(0, 0.9, 0);
-    uvs.push(0.5, 1.0);
+    uvs.push(0.5, 0.75);
     colors.push(headColor.r, headColor.g, headColor.b);
     const headApexIdx = positions.length / 3 - 1;
     for (let s = 0; s < 4; s++) {
@@ -798,7 +816,7 @@ export class GrassGeometryBuilder {
 
     for (let i = 0; i < 8; i++) {
       normals.push(0, 0.88, 0.25);
-      uvs.push(0, 0.5);
+      uvs.push(0, FLOWER_BEND_WEIGHT);
       colors.push(stemColor.r, stemColor.g, stemColor.b);
     }
     // Правильный CCW обход квадов стебля
@@ -808,7 +826,7 @@ export class GrassGeometryBuilder {
     const centerIdx = 8;
     positions.push(0, stemHeight + 0.02, 0);
     normals.push(0, 0.98, 0.05);
-    uvs.push(0.5, 1.0);
+    uvs.push(0.5, FLOWER_BEND_WEIGHT);
     colors.push(centerColor.r, centerColor.g, centerColor.b);
 
     // 3. Объемные закругленные лепестки (состоят из 2 треугольников с расширением к центру)
@@ -834,7 +852,7 @@ export class GrassGeometryBuilder {
         Math.sin(midAngleL) * midDist
       );
       normals.push(0, 0.9, 0.4);
-      uvs.push(0.2, 0.4);
+      uvs.push(0.2, FLOWER_BEND_WEIGHT);
       colors.push(petalColor.r, petalColor.g, petalColor.b);
 
       // Правая точка расширения лепестка
@@ -851,7 +869,7 @@ export class GrassGeometryBuilder {
       const tipDist = flowerRadius * 1.15;
       positions.push(Math.cos(angle) * tipDist, stemHeight + 0.035, Math.sin(angle) * tipDist);
       normals.push(Math.cos(angle) * 0.3, 0.85, Math.sin(angle) * 0.3);
-      uvs.push(0.5, 1.0);
+      uvs.push(0.5, FLOWER_BEND_WEIGHT);
       colors.push(petalColor.r, petalColor.g, petalColor.b);
 
       // Два треугольника лепестка (CCW обход: Центр -> Лево -> Кончик, Центр -> Кончик -> Право)

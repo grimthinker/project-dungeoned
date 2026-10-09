@@ -35,6 +35,7 @@ export const ru = {
     collisions: 'Коллизии',
     aiDebug: 'AI Debug',
     celShading: 'Cel Shading',
+    outlineLines: 'Контуры',
     fpsMonitor: 'Мониторинг',
     hotkeysTitle: 'Горячие клавиши',
     dialogues: 'Диалоги',

@@ -31,6 +31,8 @@ export interface TopBarProps {
   setShowAIDebug: (val: boolean) => void;
   celShading: boolean;
   setCelShading: (val: boolean) => void;
+  outlineLines: boolean;
+  setOutlineLines: (val: boolean) => void;
   showFPSMonitor: boolean;
   setShowFPSMonitor: (val: boolean) => void;
   onOpenDialogueEditor?: () => void;
@@ -64,6 +66,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   setShowAIDebug,
   celShading,
   setCelShading,
+  outlineLines,
+  setOutlineLines,
   showFPSMonitor,
   setShowFPSMonitor,
   onOpenDialogueEditor,
@@ -466,6 +470,25 @@ export const TopBar: React.FC<TopBarProps> = ({
             style={{ accentColor: '#9b59b6' }}
           />
           {t('topbar.celShading')}
+        </label>
+
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            cursor: 'pointer',
+            fontSize: '12px',
+            color: '#e67e22',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={outlineLines}
+            onChange={(e) => setOutlineLines(e.target.checked)}
+            style={{ accentColor: '#e67e22' }}
+          />
+          {t('topbar.outlineLines')}
         </label>
 
         <label

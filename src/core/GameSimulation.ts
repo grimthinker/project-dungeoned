@@ -526,6 +526,10 @@ export class GameSimulation {
       }
       this.world.removeEntity(id);
     }
+    // Коллайдеры чанков рельефа НЕ являются компонентом physicsBody — они лежат
+    // в карте драйвера. Без этой строки они переживают смену мира и остаются
+    // в физике как невидимый рельеф прошлой карты.
+    this.physicsDriver.clearTerrainChunks();
     this.aiSystem.clear();
     this.app.editor.selection.clear();
     this.app.editor.commandHistory.clear();
@@ -563,6 +567,14 @@ export class GameSimulation {
   }
 
   public deserializeWorld(data: SerializedWorldData | Record<string, any>): void {
+    // Десериализация НЕ чистит мир сама: она удаляет только те сущности, чьи id
+    // встречаются в данных. Старые сущности, отсутствующие в файле (и все
+    // коллайдеры чанков рельефа), оставались бы в физике как невидимые тела.
+    // Поэтому полная замена мира всегда начинается с очистки.
+    //
+    // Это безопасно для Undo/Redo: EntitySnapshotCommand работает через
+    // deserializeEntities() для поддерева, а не через deserializeWorld().
+    this.clearWorld();
     this.serializer.deserializeWorld(data);
     this.syncPhysicsStructures();
   }

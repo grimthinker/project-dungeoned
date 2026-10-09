@@ -35,6 +35,7 @@ export const en = {
     collisions: 'Collisions',
     aiDebug: 'AI Debug',
     celShading: 'Cel Shading',
+    outlineLines: 'Outlines',
     fpsMonitor: 'Monitor',
     hotkeysTitle: 'Hotkeys',
     dialogues: 'Dialogues',

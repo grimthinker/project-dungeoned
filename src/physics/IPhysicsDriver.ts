@@ -162,6 +162,15 @@ export interface IPhysicsDriver {
     entityId?: string
   ): void;
   removeTerrainChunk(chunkId: string): void;
+  /**
+   * Удаляет ВСЕ коллайдеры чанков рельефа.
+   *
+   * Нужна при смене мира. Коллайдеры чанков живут в карте драйвера, а НЕ как
+   * компонент physicsBody сущности, поэтому обход сущностей их не находит, и
+   * без этого вызова коллизии прошлого мира остаются в физическом мире как
+   * невидимый рельеф (например, старый холм мешает ходить по новой плоскости).
+   */
+  clearTerrainChunks(): void;
   wakeUpDynamicBodiesInRadius(center: Vec3, radius: number): void;
 
   queryEntitiesInSphere(center: Vec3, radius: number): string[];

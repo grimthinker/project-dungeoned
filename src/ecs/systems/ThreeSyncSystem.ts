@@ -28,7 +28,7 @@ import { BALANCE_CONFIG } from '../../config/balanceConfig';
 import { ToonMaterialManager } from '../../rendering/materials/ToonMaterialManager';
 import { createWaterMaterial } from '../../rendering/materials/WaterMaterial';
 import { WaterRippleManager, WaterDisturbance } from '../../rendering/water/WaterRippleManager';
-import { GRAPHICS_CONFIG } from '../../config/graphicsConfig';
+import { GRAPHICS_CONFIG, computeShadowBounds } from '../../config/graphicsConfig';
 import { WaterComponent } from '../components/water';
 import { TransformComponent } from '../components/physics';
 import { getTerrainHeightAt, TerrainComponent } from '../components/terrain';
@@ -110,6 +110,11 @@ export class ThreeSyncSystem {
   private _lastSelectedIds = new Set<EntityId>();
   private _lastSelectedIdsValid = false;
 
+  // Отсечение теней у объектов: прошлый фокус и радиус, для которых уже пересчитывали
+  private _lastCullerFocusX = Number.NaN;
+  private _lastCullerFocusZ = Number.NaN;
+  private _lastCullerBounds = -1;
+
   // Scratch-объекты освещения воды: общий расчет один раз на кадр (без аллокаций на водоём)
   private _waterLightingReady = false;
   private _waterSunDir = new THREE.Vector3();
@@ -117,6 +122,8 @@ export class ThreeSyncSystem {
   private _waterAmbient = new THREE.Color(0.25, 0.3, 0.4);
   private _dirScratch = new THREE.Vector3();
   private _colScratch = new THREE.Color();
+  // Scratch для отсечения теней: без аллокаций в обходе объектов
+  private _shadowCullScratch = new THREE.Vector3();
 
   // Кэшированные материалы для производительности (фоллбэк)
   private matPlayer = new THREE.MeshLambertMaterial({ color: 0x2980b9 });
@@ -236,6 +243,11 @@ export class ThreeSyncSystem {
     this.animators.clear();
     this.loadingMeshes.clear();
     this.loadingGenerations.clear();
+    // Сброс состояния отсечения теней: после пересборки мира первый же вызов
+    // обязан пересчитать castShadow для всех объектов заново
+    this._lastCullerFocusX = Number.NaN;
+    this._lastCullerFocusZ = Number.NaN;
+    this._lastCullerBounds = -1;
   }
 
   public applySettings(): void {
@@ -378,7 +390,8 @@ export class ThreeSyncSystem {
     cameraTargetX: number = 0,
     cameraTargetZ: number = 0,
     physicsAccumulator: number = 0,
-    fixedDt: number = 1 / 60
+    fixedDt: number = 1 / 60,
+    cameraScale: number = 1
   ): void {
     this.currentWorld = world;
     // Освещение воды пересчитывается заново в этом кадре (при наличии водоемов)
@@ -652,6 +665,34 @@ export class ThreeSyncSystem {
           this.toonManager.applyToon(obj);
           if (!this.loadingMeshes.has(id)) {
             obj.userData.isToonApplied = true;
+          }
+        }
+
+        /**
+         * Существа принимают тени.
+         *
+         * Билдеры существ (HumanoidProceduralBuilder, QuadrupedProceduralBuilder)
+         * выставляют только castShadow, но не receiveShadow. Пропы же получают
+         * receiveShadow в ProceduralPropManager, поэтому экипировка на спине
+         * (это проп, прикреплённый к торасу) темнела в тени, а само тело — нет:
+         * выглядело как персонаж, у которого затенён только рюкзак.
+         *
+         * Ставим флаги здесь, а не в билдерах, потому что сюда попадают все
+         * пути сборки существа: модульный риг, оторванная конечность и
+         * фолбэк-примитивы.
+         */
+        if (
+          (archetype === 'creature' || archetype === 'bodyPart') &&
+          !obj.userData.creatureShadowFlagsApplied
+        ) {
+          obj.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+          if (!this.loadingMeshes.has(id)) {
+            obj.userData.creatureShadowFlagsApplied = true;
           }
         }
 
@@ -979,6 +1020,80 @@ export class ThreeSyncSystem {
     const terrainComp = terrainEntities.length > 0 ? terrainEntities[0][1].terrain : undefined;
     const trampleStamps = this.collectTrampleStamps(world, terrainComp);
     this.grassSync.update(dt, trampleStamps, terrainComp, cameraTargetX, cameraTargetZ);
+
+    // Отсечение теней у чанков рельефа за пределами теневой камеры.
+    // Здесь, а не в ветке terrain выше: должен выполняться ровно раз за кадр,
+    // независимо от того, обновлялась ли геометрия рельефа в этом кадре.
+    const shadowBounds = computeShadowBounds(cameraScale);
+    this.terrainSync.updateChunkShadowCasting(cameraTargetX, cameraTargetZ, shadowBounds);
+    this.updateEntityShadowCasting(cameraTargetX, cameraTargetZ, shadowBounds, world);
+  }
+
+  /**
+   * Гасит castShadow у объектов, стоящих за пределами теневой камеры.
+   *
+   * ЗАЧЕМ. Тот же приём, что и для чанков рельефа: объект вне охвата тени всё
+   * равно не может её дать, но продолжает стоять в проходе карты теней и стоить
+   * draw call. В лесу с сотней деревьев за пределами охвата это заметная часть
+   * всех вызовов кадра.
+   *
+   * Пересчёт по тем же порогам, что у рельефа, — иначе обход всех сущностей
+   * сам стал бы новым источником затрат на CPU.
+   *
+   * Оригинальное намерение (как объект был настроен) хранится в userData, иначе
+   * после первого отсечения нельзя отличить «должен отбрасывать тень» от
+   * «отключено за дальностью» и вернуть состояние назад.
+   */
+  private updateEntityShadowCasting(
+    focusX: number,
+    focusZ: number,
+    bounds: number,
+    world: World
+  ): void {
+    if (!GRAPHICS_CONFIG.shadows.enabled) return;
+
+    const moved =
+      !Number.isFinite(this._lastCullerFocusX) ||
+      Math.abs(focusX - this._lastCullerFocusX) > 1.0 ||
+      Math.abs(focusZ - this._lastCullerFocusZ) > 1.0 ||
+      bounds !== this._lastCullerBounds;
+
+    if (!moved) return;
+
+    this._lastCullerFocusX = focusX;
+    this._lastCullerFocusZ = focusZ;
+    this._lastCullerBounds = bounds;
+
+    for (const [id, obj] of this.meshes) {
+      // Архетипы, которые нельзя трогать: рельеф отсекается собственным кодом
+      // по чанкам, вода и зоны теней не отбрасывают вовсе
+      const archetype = world.getComponent(id, 'tag')?.archetype;
+      if (archetype === 'terrain' || archetype === 'water' || archetype === 'zone') continue;
+
+      // Радиус берём из физики: он уже есть у препятствий, деревьев и
+      // существ и не требует обхода геометрии
+      const physStats = world.getComponent(id, 'physicsStats');
+      const radius = physStats?.radius.current ?? 1.5;
+      const limit = bounds + radius;
+
+      obj.updateMatrixWorld();
+      obj.traverse((child) => {
+        if (!(child instanceof THREE.Mesh)) return;
+
+        // Запоминаем исходное намерение ровно один раз
+        if (child.userData.desiredCastShadow === undefined) {
+          child.userData.desiredCastShadow = child.castShadow;
+        }
+        if (!child.userData.desiredCastShadow) return;
+
+        // Мировая позиция: у вложенных мешей (конусы кроны, части существ)
+        // локальная ничего не значит
+        const p = child.getWorldPosition(this._shadowCullScratch);
+        const dx = p.x - focusX;
+        const dz = p.z - focusZ;
+        child.castShadow = dx * dx + dz * dz <= limit * limit;
+      });
+    }
   }
 
   public collectTrampleStamps(world: World, terrainComp?: TerrainComponent): TrampleStamp[] {

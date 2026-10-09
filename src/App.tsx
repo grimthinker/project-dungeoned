@@ -54,6 +54,10 @@ export const App: React.FC = () => {
       localStorage.getItem('engine_cel_shading') !== null
         ? localStorage.getItem('engine_cel_shading') === 'true'
         : true,
+    outlineLines:
+      localStorage.getItem('engine_outline_lines') !== null
+        ? localStorage.getItem('engine_outline_lines') === 'true'
+        : true,
     showFPSMonitor:
       localStorage.getItem('engine_show_fps_monitor') !== null
         ? localStorage.getItem('engine_show_fps_monitor') === 'true'
@@ -606,6 +610,10 @@ export const App: React.FC = () => {
           celShading={engineState.celShading}
           setCelShading={(val) => {
             if (appRef.current) appRef.current.celShading = val;
+          }}
+          outlineLines={engineState.outlineLines}
+          setOutlineLines={(val) => {
+            if (appRef.current) appRef.current.outlineLines = val;
           }}
           showFPSMonitor={engineState.showFPSMonitor}
           setShowFPSMonitor={(val) => {

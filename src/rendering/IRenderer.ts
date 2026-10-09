@@ -61,6 +61,8 @@ export interface RenderContext {
   fpsStats?: FPSStats;
   /** Включена ли cel-shading обводка (пост-процесс маски кандидатов) */
   celShading?: boolean;
+  /** Включены ли контурные линии (cel-обводка + обводка выделения) */
+  outlineLines?: boolean;
 }
 
 export interface IRenderer {

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 export class ProceduralPropManager {
   private static instance: ProceduralPropManager;
@@ -91,6 +92,8 @@ export class ProceduralPropManager {
     }
 
     if (prop) {
+      // Схлопываем мелочь в один меш на материал ДО кэширования прототипа
+      mergeGroupByMaterial(prop);
       // Защищаем общую геометрию и материалы от случайного удаления
       prop.traverse((child) => {
         if (child instanceof THREE.Mesh) {
@@ -98,6 +101,8 @@ export class ProceduralPropManager {
           child.userData.isSharedMaterial = true;
           child.castShadow = true;
           child.receiveShadow = true;
+
+          child.material.shadowSide = THREE.FixedSide;
         }
       });
       this.cache.set(name, prop);
@@ -2728,5 +2733,113 @@ export class ProceduralPropManager {
     });
 
     return group;
+  }
+}
+
+/**
+ * Схлопывает статическую Group в минимальное число мешей — по одному на материал.
+ *
+ * ЗАЧЕМ. Каждый Mesh в three — это отдельный draw call, даже если геометрия и
+ * материал уже шаренные между экземплярами. Дерево, собранное как Group из
+ * 5-6 мешей (ствол + несколько шаров кроны), стоит 5-6 вызовов на КАЖДЫЙ экземпляр,
+ * и столько же в проходе теней. При 25 деревьях в кадре это ~500 вызовов.
+ *
+ * Узкое место здесь — не GPU, а CPU на стороне three: при DC 840 и GPU 4 мс
+ * запас по загрузке карты есть. Схлопывание убирает вызовы, не трогая ни одного
+ * шейдера и не меняя ни одного пикселя: та же геометрия, те же материалы,
+ * те же нормали, тот же flat shading.
+ *
+ * ГРУБЫЕ ОГРАНИЧЕНИЯ (осознанные):
+ *  - Работает только для плоских объектов без скелета и без анимации. Пропы
+ *    статичны; на rigged-модели существ этот хелпер не вызывается.
+ *  - Меш, у которого материал — массив, или задан нестандартный набор
+ *    атрибутов, не сливается: mergeGeometries требует одинакового набора, и
+ *    такой меш остаётся отдельным, чтобы не получить молча сломанную геометрию.
+ *  - Вложенные группы поддерживаются: матрица каждого меша считается в
+ *    локальные координаты корня, так что промежуточные трансформации запекаются
+ *    в вершины. Пустые вложенные группы остаются в иерархии — на draw calls
+ *    это не влияет.
+ */
+function mergeGroupByMaterial(group: THREE.Group): void {
+  // 1. Собираем меши и материалы, попутно считая матрицу меша в локальных
+  //    координатах корня — она нужна, чтобы запечь позицию/поворот в вершины.
+  group.updateMatrixWorld(true);
+
+  const rootInverse = new THREE.Matrix4().copy(group.matrixWorld).invert();
+  const byMaterial = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const merged: THREE.Mesh[] = [];
+
+  group.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    if (Array.isArray(child.material)) return;
+    if (!child.geometry) return;
+
+    // Нестандартный набор атрибутов — оставляем меш как есть
+    const attrs = child.geometry.attributes;
+    const names = Object.keys(attrs);
+    const hasStandard = ['position', 'normal', 'uv'].every((n) => n in attrs);
+    if (!hasStandard) return;
+    const isStandardOnly = names.every((n) => n === 'position' || n === 'normal' || n === 'uv');
+    if (!isStandardOnly) return;
+
+    // mergeGeometries требует одинаковой индексации во всей пачке: смешанные
+    // indexed/non-indexed геометрии оно отвергает целиком. Приводим все к
+    // non-indexed — вершинная геометрия маленькая, а шейдеры с flatShading
+    // всё равно работают по граням, так что картинка не меняется.
+    const geo = (child.geometry.index ? child.geometry.toNonIndexed() : child.geometry).clone();
+
+    // Запекаем локальную трансформацию меша в вершины и нормали
+    const local = new THREE.Matrix4().multiplyMatrices(rootInverse, child.matrixWorld);
+    geo.applyMatrix4(local);
+
+    const list = byMaterial.get(child.material);
+    if (list) {
+      list.push(geo);
+    } else {
+      byMaterial.set(child.material, [geo]);
+    }
+    merged.push(child);
+  });
+
+  // Нет смысла сливать, если нечего: один меш на материал — уже минимум
+  if (merged.length < 2) {
+    for (const g of byMaterial.values()) for (const geo of g) geo.dispose();
+    return;
+  }
+
+  // 2. Каждая группа превращается в один меш. Если слияние не удалось,
+  //    исходные геометрии этой группы просто переиспользуются поштучно.
+  const createdMeshes: THREE.Mesh[] = [];
+
+  for (const [material, geometries] of byMaterial) {
+    if (geometries.length === 1) {
+      createdMeshes.push(new THREE.Mesh(geometries[0], material));
+      continue;
+    }
+
+    const mergedGeo = mergeGeometries(geometries, false);
+    if (!mergedGeo) {
+      // Слияние не удалось — безопасный откат: каждый исходный меш остаётся
+      // отдельным, геометрии не трогаем (они уже не наши, dispose не делаем)
+      for (const geo of geometries) createdMeshes.push(new THREE.Mesh(geo, material));
+      continue;
+    }
+    for (const geo of geometries) geo.dispose();
+    createdMeshes.push(new THREE.Mesh(mergedGeo, material));
+  }
+
+  if (createdMeshes.length === 0) {
+    for (const g of byMaterial.values()) for (const geo of g) geo.dispose();
+    return;
+  }
+
+  // 3. Пересобираем содержимое группы: слитые меши убираем (вместе с их
+  //    промежуточными трансформациями), неслитые остаются как были.
+  for (const child of merged) {
+    if (child.parent) child.parent.remove(child);
+  }
+
+  for (const mesh of createdMeshes) {
+    group.add(mesh);
   }
 }

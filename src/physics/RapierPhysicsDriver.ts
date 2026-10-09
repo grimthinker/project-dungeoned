@@ -571,6 +571,16 @@ export class RapierPhysicsDriver implements IPhysicsDriver {
     }
   }
 
+  public clearTerrainChunks(): void {
+    if (this.terrainChunks.size === 0) return;
+
+    for (const [, chunk] of [...this.terrainChunks]) {
+      this.removeRigidBody(chunk.bodyHandle);
+    }
+    this.terrainChunks.clear();
+    this.isBroadPhaseDirty = true;
+  }
+
   // --- ЗАПРОСЫ ---
 
   public queryEntitiesInSphere(center: Vec3, radius: number): string[] {

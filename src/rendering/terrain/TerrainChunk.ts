@@ -6,6 +6,11 @@ export class TerrainChunk {
   public mesh: THREE.Mesh;
   public geometry: THREE.PlaneGeometry;
 
+  /** Мировая позиция центра чанка по X (нужна для отсечения теней) */
+  public readonly worldX: number;
+  /** Мировая позиция центра чанка по Z */
+  public readonly worldZ: number;
+
   constructor(
     public readonly id: string,
     public readonly cx: number,
@@ -20,6 +25,8 @@ export class TerrainChunk {
 
     const posX = cx * size + size / 2 - globalWidth / 2;
     const posZ = cz * size + size / 2 - globalDepth / 2;
+    this.worldX = posX;
+    this.worldZ = posZ;
 
     // Расчет UV строго из глобальных мировых координат вершин
     // Устраняет инверсию V в Three.js PlaneGeometry и полностью убирает швы вдоль оси X
@@ -92,3 +99,13 @@ export class TerrainChunk {
     this.geometry.dispose();
   }
 }
+
+/**
+ * Полуразмер, внутри которого чанк ещё отбрасывает тень (в метрах).
+ *
+ * Теневая камера — ортографическая, поэтому её охват по мировой оси Z
+ * ограничен тем же bounds. Проверка идёт по ОДНОМУ значению для обоих
+ * направлений: солнце и луна смотрят в противоположные стороны, но обе
+ * камеры центрированы на одной точке фокуса и имеют одинаковый bounds.
+ */
+export const CHUNK_SHADOW_MARGIN = TERRAIN_CONFIG.chunkSize * 0.71;

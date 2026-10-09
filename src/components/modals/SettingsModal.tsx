@@ -257,6 +257,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                   <option value="1024">1024 (Low)</option>
                   <option value="2048">2048 (Medium)</option>
                   <option value="4096">4096 (High)</option>
+                  <option value="8192">8192 (Max)</option>
                 </select>
               </label>
             </div>

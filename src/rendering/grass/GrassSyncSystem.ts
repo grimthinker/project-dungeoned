@@ -107,6 +107,14 @@ export class GrassSyncSystem {
     uniforms.uFadeStart.value = this.fadeStartDistance;
     uniforms.uFadeEnd.value = this.fadeEndDistance;
 
+    // Параметры разрежения живут в шейдере, поэтому подтягиваются каждый кадр:
+    // меняешь их в инспекторе — трава реагирует сразу, без пересборки чанков
+    const lodCfg = GRASS_CONFIG.lod;
+    uniforms.uLodStart.value = lodCfg.blendStartDistance;
+    uniforms.uLodEnd.value = lodCfg.blendEndDistance;
+    uniforms.uMinDensity.value = lodCfg.minDensityFactor;
+    uniforms.uDensityFadeWidth.value = lodCfg.densityFadeWidth;
+
     if (this.renderer) {
       this.trampleManager.update(this.renderer, dt, trampleStamps, camX, camZ);
 
@@ -287,9 +295,20 @@ export class GrassSyncSystem {
     const { blendStartDistance: start, blendEndDistance: end } = GRASS_CONFIG.lod;
 
     if (distToChunk + halfDiag <= start) {
-      // Весь чанк ближе начала полосы: все инстансы гарантированно полные
+      // Весь чанк ближе начала полосы: все инстансы гарантированно полные.
+      //
+      // Точка отсчёта — сам центр чанка, и это доказуемо корректно: условие
+      // ветки distToChunk + halfDiag <= start означает halfDiag <= start, а
+      // половина диагонали — это максимальное расстояние от центра чанка до
+      // любой его точки. Значит все инстансы лежат ближе start и lodBlendFactor
+      // даёт для них ровно 0.
+      //
+      // Смещение здесь было бы не просто лишним, а вредным: константа
+      // start + halfDiag + 1 (~50 м) отправляла точку отсчёта за пределы
+      // карты, и при камере в центре чанка ближайший край оказывался на ~33 м
+      // — уже за start, то есть весь чанк деградировал вместо полного.
       return {
-        lodCamX: centerX - (start + halfDiag + 1),
+        lodCamX: centerX,
         lodCamZ: centerZ,
         cameraIndependent: true,
       };

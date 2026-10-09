@@ -94,7 +94,8 @@ export class TimeManager {
       this.app.camera.targetX,
       this.app.camera.targetZ,
       this.physicsAccumulator,
-      this.FIXED_DT
+      this.FIXED_DT,
+      this.app.camera.scale
     );
 
     this.app.renderFrame();

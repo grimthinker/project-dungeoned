@@ -12,6 +12,7 @@ export interface EventMap {
     showUIOverlays: boolean;
     showAIDebug: boolean;
     celShading: boolean;
+    outlineLines: boolean;
     showFPSMonitor: boolean;
   };
   'selection:changed': {
